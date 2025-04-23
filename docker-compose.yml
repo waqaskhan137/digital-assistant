@@ -1,0 +1,80 @@
+version: '3'
+
+services:
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./services/auth_service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - REDIRECT_URI=http://localhost:8001/auth/callback
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  email-service:
+    build:
+      context: .
+      dockerfile: ./services/email_service/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - REDIS_HOST=redis
+    depends_on:
+      - auth-service
+      - redis
+      - rabbitmq
+
+  classification-service:
+    build:
+      context: ./services/classification_service
+    ports:
+      - "8003:8000"
+    depends_on:
+      - rabbitmq
+
+  response-service:
+    build:
+      context: ./services/response_service
+    ports:
+      - "8004:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - rabbitmq
+
+  draft-service:
+    build:
+      context: ./services/draft_service
+    ports:
+      - "8005:8000"
+    depends_on:
+      - auth-service
+      - rabbitmq
+
+  api-gateway:
+    build:
+      context: ./services/api_gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - auth-service
+      - email-service
+      - classification-service
+      - response-service
+      - draft-service
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"

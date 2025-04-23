@@ -1,0 +1,114 @@
+# System Patterns
+
+## Architecture Overview
+The Gmail Automation project follows a true microservices architecture, with each service having a single responsibility. Services communicate via REST APIs and message queues, ensuring loose coupling and independent scalability.
+
+```
++----------------+       +------------------+       
+|   API Gateway  | <-->  | Auth Service     |       
+|                |       | (OAuth 2.0 Flow) |       
++----------------+       +------------------+       
+        |                        |                  
+        v                        v                  
++----------------+       +------------------+       +----------------------+       
+| Classification | <-->  | Email Ingestion  | <--> | Draft Management     |
+| Service        |       | Service          |       | Service             |
++----------------+       +------------------+       +----------------------+
+        |                                                    ^
+        v                                                    |
++------------------+                                         |
+| Response Gen.    | ----------------------------------------+
+| Service          |
++------------------+
+```
+
+## Core Design Patterns
+
+### 1. Microservices Architecture
+- Each service has a single responsibility
+- Independent deployment and scaling
+- Service-specific data storage when needed
+- Communication via well-defined APIs
+
+### 2. Event-Driven Flow
+- Email arrival triggers processing pipeline
+- RabbitMQ for asynchronous communication between services
+- Event-based coordination of workflow
+
+### 3. Authentication & Security
+- Dedicated Auth Service for OAuth 2.0 implementation
+- Token management centralized in Auth Service
+- Secure token storage and refresh logic
+
+### 4. Test-Driven Development (TDD)
+- Tests written before implementation code
+- Red-Green-Refactor cycle for all components
+- Mocking of external dependencies for unit testing
+- Integration tests for service boundaries
+
+### 5. Strategy Pattern for Classification
+- Multiple classification strategies (rule-based, ML-based)
+- Pluggable classification algorithms
+- User-configurable rules
+
+### 6. Adapter Pattern for AI Integrations
+- Clean interface to abstract different AI providers
+- Easily swap between OpenAI, Google Gemini, or others
+- Consistent prompt and response handling
+
+### 7. API Gateway Pattern
+- Single entry point for client applications
+- Request routing to appropriate microservices
+- Authentication and authorization enforcement
+
+## Service Responsibilities
+
+1. **Auth Service**
+   - OAuth 2.0 authentication flow
+   - Token acquisition, storage, and refresh
+   - Scope management for Gmail API
+
+2. **Email Ingestion Service**
+   - Gmail API integration
+   - Email polling or webhook handling
+   - Initial email normalization
+
+3. **Classification Service**
+   - Email categorization
+   - Label management
+   - "Needs reply" determination
+
+4. **Response Generation Service**
+   - AI provider integration
+   - Prompt construction
+   - Response validation
+
+5. **Draft Management Service**
+   - Draft creation in Gmail
+   - Draft metadata management
+   - Template handling
+
+6. **API Gateway**
+   - Request routing
+   - Authentication verification
+   - Rate limiting
+
+## Data Flow
+1. **Authentication**: User authenticates via Auth Service
+2. **Email Ingestion**: Email Service connects to Gmail API and receives new emails
+3. **Classification**: Emails sent to Classification Service for analysis
+4. **Action Determination**: Classification Service decides if email needs a reply
+5. **Response Generation**: For emails needing replies, sent to Response Service
+6. **Persistence**: Draft Service saves responses as drafts; Classification Service applies labels
+
+## Error Handling Strategy
+- Retry logic for transient failures
+- Dead-letter queues for failed processing
+- Circuit breaker pattern for external service failures
+- Comprehensive logging with correlation IDs
+
+## Scalability Considerations
+- Horizontal scaling for each microservice independently
+- Rate limiting to respect Gmail API quotas
+- Caching to reduce API calls
+- Stateless services where possible
