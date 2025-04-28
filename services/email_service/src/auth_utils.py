@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Dict, Any
 from google.oauth2.credentials import Credentials
+from shared.exceptions import ConfigurationError # Import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,11 @@ def convert_token_to_credentials(token_dict: Dict[str, Any]) -> Credentials:
     client_id = token_dict.get('client_id', os.getenv('GOOGLE_CLIENT_ID'))
     client_secret = token_dict.get('client_secret', os.getenv('GOOGLE_CLIENT_SECRET'))
     
+    # Raise ConfigurationError if client ID or secret is missing
+    if not client_id or not client_secret:
+        logger.error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET for creating credentials.")
+        raise ConfigurationError("Missing Google OAuth client ID or secret configuration.")
+        
     # Parse scopes if available
     scopes = token_dict.get('scope')
     if isinstance(scopes, str):

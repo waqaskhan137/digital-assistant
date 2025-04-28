@@ -4,6 +4,7 @@ import asyncio
 from typing import Dict, Any, Optional
 import aio_pika
 from shared.models.email import EmailMessage
+from shared.exceptions import ExternalServiceError, ConfigurationError, GmailAutomationError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ class RabbitMQClient:
         if self._initialized:
             return
         
+        if not self.connection_url:
+            logger.error("Missing RabbitMQ connection URL")
+            raise ConfigurationError("RabbitMQ connection URL is required")
+            
         retry_count = 0
         while retry_count < self.max_retries:
             try:
@@ -54,21 +59,36 @@ class RabbitMQClient:
                 self._initialized = True
                 return
                 
-            except Exception as e:
+            except aio_pika.exceptions.AMQPConnectionError as e:
                 retry_count += 1
                 if retry_count >= self.max_retries:
-                    logger.error(f"Failed to initialize RabbitMQ connection after {self.max_retries} attempts: {str(e)}")
-                    raise
+                    logger.error(f"Failed to connect to RabbitMQ after {self.max_retries} attempts: {str(e)}")
+                    raise ConfigurationError(f"Unable to connect to RabbitMQ: {e}") from e
                 
                 logger.warning(f"RabbitMQ connection attempt {retry_count} failed: {str(e)}. Retrying in {self.retry_delay} seconds...")
                 await asyncio.sleep(self.retry_delay)
+            except Exception as e:
+                logger.error(f"Unexpected error during RabbitMQ initialization: {str(e)}")
+                raise ConfigurationError(f"Failed to initialize RabbitMQ client: {e}") from e
     
     async def close(self):
         """Close the RabbitMQ connection."""
         if self.connection and not self.connection.is_closed:
-            await self.connection.close()
-            self._initialized = False
-            logger.info("RabbitMQ connection closed")
+            try:
+                await self.connection.close()
+                self._initialized = False
+                logger.info("RabbitMQ connection closed")
+            except Exception as e:
+                logger.warning(f"Error closing RabbitMQ connection: {e}")
+                # No need to re-raise as this is cleanup
+    
+    async def _ensure_initialized(self):
+        """Ensure the RabbitMQ client is initialized before use."""
+        if not self._initialized:
+            await self.initialize()
+        
+        if not self._initialized or not self.exchange:
+            raise ConfigurationError("RabbitMQ client initialization failed")
     
     async def publish_email(self, email: EmailMessage, routing_key: str = "email.new"):
         """
@@ -78,8 +98,7 @@ class RabbitMQClient:
             email: The normalized EmailMessage to publish
             routing_key: The routing key for message routing (default: email.new)
         """
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
         
         try:
             # Convert EmailMessage to dict and then to JSON
@@ -105,9 +124,15 @@ class RabbitMQClient:
             
             logger.info(f"Published email with ID {email.id} to RabbitMQ with routing key {routing_key}")
             
+        except (TypeError, ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to serialize email for RabbitMQ: {str(e)}")
+            raise ExternalServiceError(f"Failed to serialize email for publishing: {e}") from e
+        except aio_pika.exceptions.AMQPException as e:
+            logger.error(f"AMQP error during email publishing: {str(e)}")
+            raise ExternalServiceError(f"RabbitMQ error during message publishing: {e}") from e
         except Exception as e:
-            logger.error(f"Failed to publish email to RabbitMQ: {str(e)}")
-            raise
+            logger.error(f"Unexpected error publishing email to RabbitMQ: {str(e)}")
+            raise GmailAutomationError(f"Unexpected error during message publishing: {e}") from e
     
     async def publish_batch(self, emails: list[EmailMessage], routing_key: str = "email.batch"):
         """
@@ -117,8 +142,7 @@ class RabbitMQClient:
             emails: List of EmailMessage objects to publish
             routing_key: The routing key for message routing (default: email.batch)
         """
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
         
         try:
             # Convert list of emails to list of dicts
@@ -148,6 +172,12 @@ class RabbitMQClient:
             
             logger.info(f"Published batch of {len(emails)} emails to RabbitMQ with routing key {routing_key}")
             
+        except (TypeError, ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to serialize email batch for RabbitMQ: {str(e)}")
+            raise ExternalServiceError(f"Failed to serialize email batch for publishing: {e}") from e
+        except aio_pika.exceptions.AMQPException as e:
+            logger.error(f"AMQP error during batch publishing: {str(e)}")
+            raise ExternalServiceError(f"RabbitMQ error during batch publishing: {e}") from e
         except Exception as e:
-            logger.error(f"Failed to publish email batch to RabbitMQ: {str(e)}")
-            raise
+            logger.error(f"Unexpected error publishing batch to RabbitMQ: {str(e)}")
+            raise GmailAutomationError(f"Unexpected error during batch publishing: {e}") from e

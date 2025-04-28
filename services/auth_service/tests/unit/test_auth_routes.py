@@ -2,33 +2,44 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
+import json
 
 from src.main import app
 from shared.models.token import Token
+from src.routes import auth
+from shared.exceptions import ResourceNotFoundError, ValidationError
 
+# Clear any existing dependency overrides
+app.dependency_overrides = {}
 
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture
 def mock_oauth_client():
     """Create a mock OAuth client."""
-    with patch('src.routes.auth.get_oauth_client') as mock:
-        oauth_client = MagicMock()
-        mock.return_value = oauth_client
-        yield oauth_client
+    oauth_client = MagicMock()
+    return oauth_client
 
 
 @pytest.fixture
 def mock_token_storage():
     """Create a mock token storage."""
-    with patch('src.routes.auth.get_token_storage') as mock:
-        token_storage = MagicMock()
-        mock.return_value = token_storage
-        yield token_storage
+    token_storage = MagicMock()
+    return token_storage
+
+
+@pytest.fixture(autouse=True)
+def override_dependencies(mock_oauth_client, mock_token_storage):
+    """Override FastAPI dependencies before each test."""
+    app.dependency_overrides[auth.get_oauth_client] = lambda: mock_oauth_client
+    app.dependency_overrides[auth.get_token_storage] = lambda: mock_token_storage
+    yield
+    app.dependency_overrides = {}
 
 
 class TestAuthRoutes:
@@ -48,7 +59,6 @@ class TestAuthRoutes:
         response_json = response.json()
         assert "auth_url" in response_json
         assert response_json["auth_url"] == auth_url
-        # The endpoint also returns a 'state' parameter for tracking the user
         assert "state" in response_json
         assert response_json["state"].startswith("test_user_")
         mock_oauth_client.get_authorization_url.assert_called_once()
@@ -87,7 +97,7 @@ class TestAuthRoutes:
         
         # Verify
         assert response.status_code == 400
-        assert "detail" in response.json()  # Changed from "error" to "detail"
+        assert "detail" in response.json()
 
     def test_callback_token_error(self, client, mock_oauth_client):
         """Test callback with token exchange error."""
@@ -99,8 +109,8 @@ class TestAuthRoutes:
         response = client.get(f"/auth/callback?code={auth_code}&state=test_user")
         
         # Verify
-        assert response.status_code == 500
-        assert "detail" in response.json()  # Changed from "error" to "detail"
+        assert response.status_code == 502  # Changed from 500 to 502 Bad Gateway (external service error)
+        assert "detail" in response.json()
 
     def test_token_get_success(self, client, mock_token_storage):
         """Test getting a token successfully."""
@@ -128,19 +138,31 @@ class TestAuthRoutes:
         # Setup
         user_id = "nonexistent_user"
         mock_token_storage.get_token.return_value = None
+        mock_token_storage.get_token.side_effect = ResourceNotFoundError(f"No token found for user {user_id}")
         
         # Execute
         response = client.get(f"/auth/token/{user_id}")
         
         # Verify
         assert response.status_code == 404
-        assert "detail" in response.json()  # Changed from "error" to "detail"
+        assert "detail" in response.json()
 
     @patch('os.getenv')
     def test_token_refresh_success(self, mock_getenv, client, mock_oauth_client, mock_token_storage):
         """Test refreshing a token successfully."""
         # Setup mock environment variables
-        mock_getenv.return_value = "dummy_value"  # Make sure all env vars return a value
+        def getenv_side_effect(key, default=None):
+            env = {
+                "REDIS_HOST": "localhost",
+                "REDIS_PORT": "6379",
+                "REDIS_DB": "0",
+                "REDIS_PASSWORD": None,
+                "GOOGLE_CLIENT_ID": "test_client_id",
+                "GOOGLE_CLIENT_SECRET": "test_client_secret",
+                "REDIRECT_URI": "http://localhost:8000/auth/callback"
+            }
+            return env.get(key, default)
+        mock_getenv.side_effect = getenv_side_effect
         
         # Setup
         user_id = "test_user_123"
@@ -177,18 +199,30 @@ class TestAuthRoutes:
     def test_token_refresh_not_found(self, mock_getenv, client, mock_token_storage):
         """Test refreshing a non-existent token."""
         # Setup mock environment variables
-        mock_getenv.return_value = "dummy_value"  # Make sure all env vars return a value
+        def getenv_side_effect(key, default=None):
+            env = {
+                "REDIS_HOST": "localhost",
+                "REDIS_PORT": "6379",
+                "REDIS_DB": "0",
+                "REDIS_PASSWORD": None,
+                "GOOGLE_CLIENT_ID": "test_client_id",
+                "GOOGLE_CLIENT_SECRET": "test_client_secret",
+                "REDIRECT_URI": "http://localhost:8000/auth/callback"
+            }
+            return env.get(key, default)
+        mock_getenv.side_effect = getenv_side_effect
         
         # Setup
         user_id = "nonexistent_user"
         mock_token_storage.get_token.return_value = None
+        mock_token_storage.get_token.side_effect = ResourceNotFoundError(f"No token found for user {user_id}")
         
         # Execute
         response = client.post(f"/auth/token/{user_id}/refresh")
         
         # Verify
         assert response.status_code == 404
-        assert "detail" in response.json()  # Changed from "error" to "detail"
+        assert "detail" in response.json()
 
     def test_token_revoke_success(self, client, mock_token_storage):
         """Test revoking a token successfully."""
@@ -209,10 +243,11 @@ class TestAuthRoutes:
         # Setup
         user_id = "nonexistent_user"
         mock_token_storage.delete_token.return_value = False
+        mock_token_storage.delete_token.side_effect = ResourceNotFoundError(f"No token found for user {user_id} to delete")
         
         # Execute
         response = client.delete(f"/auth/token/{user_id}")
         
         # Verify
         assert response.status_code == 404
-        assert "detail" in response.json()  # Changed from "error" to "detail"
+        assert "detail" in response.json()

@@ -3,20 +3,78 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 
+class EmailAddress(BaseModel):
+    """Model representing an email address with optional display name."""
+    email: str
+    name: Optional[str] = ""
+
+
+class EmailAttachment(BaseModel):
+    """Model representing an email attachment."""
+    id: str
+    message_id: str
+    filename: str
+    mime_type: str
+    size: int = 0
+    content: Optional[bytes] = None
+
+
 class EmailMessage(BaseModel):
     """Model representing an email message."""
     id: str
     user_id: str
     thread_id: Optional[str] = None
     labels: List[str] = []
-    snippet: Optional[str] = None
     subject: str
-    from_email: str  # Email sender address
-    to: str          # Email recipient address
-    cc: Optional[str] = None
-    bcc: Optional[str] = None
+    # Updated to use EmailAddress objects instead of strings
+    from_address: EmailAddress
+    to_addresses: List[EmailAddress] = []
+    cc_addresses: List[EmailAddress] = []
+    bcc_addresses: List[EmailAddress] = []
     date: datetime
-    body_html: Optional[str] = None  # HTML version of the email body
-    body_text: str                   # Plain text version of the email body
-    has_attachments: bool = False
+    html_content: Optional[str] = None  # HTML version of the email body
+    text_content: str                   # Plain text version of the email body
+    attachments: List[EmailAttachment] = []
     raw_data: Optional[Dict[str, Any]] = None
+    
+    # For backward compatibility with existing code
+    @property
+    def from_email(self) -> str:
+        """Get the sender's email address."""
+        return self.from_address.email
+    
+    @property
+    def to(self) -> str:
+        """Get the primary recipient's email address, or comma-separated list if multiple."""
+        if not self.to_addresses:
+            return ""
+        return ", ".join([addr.email for addr in self.to_addresses])
+    
+    @property
+    def cc(self) -> Optional[str]:
+        """Get CC addresses as comma-separated string."""
+        if not self.cc_addresses:
+            return None
+        return ", ".join([addr.email for addr in self.cc_addresses])
+    
+    @property
+    def bcc(self) -> Optional[str]:
+        """Get BCC addresses as comma-separated string."""
+        if not self.bcc_addresses:
+            return None
+        return ", ".join([addr.email for addr in self.bcc_addresses])
+    
+    @property
+    def body_html(self) -> Optional[str]:
+        """Get HTML content (for backward compatibility)."""
+        return self.html_content
+    
+    @property
+    def body_text(self) -> str:
+        """Get text content (for backward compatibility)."""
+        return self.text_content
+    
+    @property
+    def has_attachments(self) -> bool:
+        """Check if the email has attachments."""
+        return len(self.attachments) > 0

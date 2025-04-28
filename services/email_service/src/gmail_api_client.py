@@ -8,6 +8,14 @@ from .rate_limiter import TokenBucketRateLimiter
 from .auth_utils import convert_token_to_credentials
 from shared.utils.retry import async_retry_on_rate_limit
 from .interfaces.email_fetcher import IEmailFetcher
+from shared.exceptions import (
+    AuthenticationError,
+    ExternalServiceError,
+    ConfigurationError,
+    ResourceNotFoundError,
+    RateLimitError,
+    GmailAutomationError
+)
 import base64
 
 logger = logging.getLogger(__name__)
@@ -57,13 +65,30 @@ class GmailApiClient(IEmailFetcher):
         Returns:
             Google OAuth2 Credentials object
         """
-        # Get the token from the Auth Service
-        token_dict = await self.auth_client.get_user_token(user_id)
-        
-        # Convert the token to a credentials object
-        credentials = convert_token_to_credentials(token_dict)
-        
-        return credentials
+        try:
+            # Get the token from the Auth Service
+            # AuthClient itself should raise appropriate exceptions (e.g., AuthenticationError, ExternalServiceError)
+            token_dict = await self.auth_client.get_user_token(user_id)
+            
+            if not token_dict:
+                logger.warning(f"No token found for user {user_id} in Auth Service.")
+                raise AuthenticationError(f"No valid token found for user {user_id}. Please re-authenticate.")
+            
+            # Convert the token to a credentials object
+            # This now raises ConfigurationError if client ID/secret are missing
+            credentials = convert_token_to_credentials(token_dict)
+            
+            return credentials
+        except AuthenticationError: # Re-raise AuthenticationError from auth_client or self
+            raise
+        except ConfigurationError: # Re-raise ConfigurationError from convert_token_to_credentials
+            raise
+        except ExternalServiceError as e: # Catch errors communicating with Auth Service
+            logger.error(f"Error communicating with Auth Service for user {user_id}: {e}")
+            raise ExternalServiceError(f"Failed to retrieve token from Auth Service: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error getting credentials for user {user_id}: {e}")
+            raise GmailAutomationError(f"Unexpected error preparing credentials for user {user_id}: {e}") from e
     
     async def get_gmail_service(self, user_id: str):
         """
@@ -76,7 +101,12 @@ class GmailApiClient(IEmailFetcher):
             Authenticated Gmail API service
         """
         credentials = await self.get_credentials(user_id)
-        return build('gmail', 'v1', credentials=credentials)
+        try:
+            return build('gmail', 'v1', credentials=credentials)
+        except Exception as e:
+            # Errors during build are usually configuration or library issues
+            logger.error(f"Failed to build Gmail service for user {user_id}: {e}")
+            raise ConfigurationError(f"Failed to initialize Gmail API client: {e}") from e
     
     # Apply retry decorator to handle rate limiting
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
@@ -94,13 +124,17 @@ class GmailApiClient(IEmailFetcher):
         Returns:
             List of email message/thread IDs matching the query.
         """
+        try:
+            service = await self.get_gmail_service(user_id)
+        except (ConfigurationError, AuthenticationError, ExternalServiceError) as e:
+             # Propagate errors from getting the service
+             raise e
+             
         messages = []
         page_token = None
-        service = await self.get_gmail_service(user_id)
         
-        # Loop to handle pagination if needed, up to max_results
         while len(messages) < max_results:
-            await self.rate_limiter.acquire_tokens(1)
+            await self.rate_limiter.acquire_tokens(1) # Assume rate limiter handles its own errors or raises standard ones
             try:
                 request = service.users().messages().list(
                     userId='me',
@@ -115,11 +149,24 @@ class GmailApiClient(IEmailFetcher):
                 if not page_token:
                     break
             except HttpError as error:
-                logger.error(f"An error occurred fetching email list for user {user_id}: {error}")
-                break
+                # Map HttpError to custom exceptions
+                if error.resp.status == 401 or error.resp.status == 403:
+                    logger.warning(f"Authentication/Authorization error fetching email list for user {user_id}: {error}")
+                    raise AuthenticationError(f"Gmail API permission error for user {user_id}: {error}") from error
+                elif error.resp.status == 404:
+                    logger.info(f"Resource not found (e.g., user mailbox) fetching email list for user {user_id}: {error}")
+                    # Depending on context, might be ResourceNotFoundError or just return empty
+                    break # Treat as no more messages found
+                elif error.resp.status == 429:
+                    logger.warning(f"Rate limit hit fetching email list for user {user_id}: {error}")
+                    # Let the retry decorator handle this, but raise RateLimitError if retries fail
+                    raise RateLimitError("Gmail API rate limit exceeded") from error 
+                else:
+                    logger.error(f"HTTP error fetching email list for user {user_id}: {error}")
+                    raise ExternalServiceError(f"Gmail API error fetching email list: {error}") from error
             except Exception as e:
-                logger.error(f"Unexpected error fetching email list for user {user_id}: {e}")
-                break
+                logger.error(f"Unexpected error fetching email list page for user {user_id}: {e}")
+                raise GmailAutomationError(f"Unexpected error during email list fetch: {e}") from e
 
         return messages[:max_results]
 
@@ -147,11 +194,25 @@ class GmailApiClient(IEmailFetcher):
             )
             return request.execute()
         except HttpError as error:
-            logger.error(f"An error occurred fetching details for message {message_id} for user {user_id}: {error}")
-            return None
+            if error.resp.status == 401 or error.resp.status == 403:
+                logger.warning(f"Authentication/Authorization error fetching details for message {message_id} (user {user_id}): {error}")
+                raise AuthenticationError(f"Gmail API permission error for message {message_id}: {error}") from error
+            elif error.resp.status == 404:
+                logger.warning(f"Message {message_id} not found for user {user_id}: {error}")
+                # Raise ResourceNotFoundError for a specific message not found
+                raise ResourceNotFoundError(f"Gmail message {message_id} not found.") from error
+            elif error.resp.status == 429:
+                logger.warning(f"Rate limit hit fetching details for message {message_id} (user {user_id}): {error}")
+                raise RateLimitError("Gmail API rate limit exceeded") from error
+            else:
+                logger.error(f"HTTP error fetching details for message {message_id} (user {user_id}): {error}")
+                raise ExternalServiceError(f"Gmail API error fetching message details: {error}") from error
+        except (ConfigurationError, AuthenticationError, ExternalServiceError) as e:
+             # Propagate errors from getting the service
+             raise e
         except Exception as e:
-            logger.error(f"Unexpected error fetching details for message {message_id} for user {user_id}: {e}")
-            return None
+            logger.error(f"Unexpected error fetching details for message {message_id} (user {user_id}): {e}")
+            raise GmailAutomationError(f"Unexpected error fetching message details: {e}") from e
 
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_emails_batch(
@@ -190,11 +251,31 @@ class GmailApiClient(IEmailFetcher):
                 id=attachment_id
             )
             response = request.execute()
+            # Check for 'data' key before decoding
+            if 'data' not in response:
+                 logger.error(f"Attachment {attachment_id} for message {message_id} (user {user_id}) response missing 'data' field.")
+                 raise ResourceNotFoundError(f"Attachment {attachment_id} data not found in response.")
             data = base64.urlsafe_b64decode(response['data'])
             return data
         except HttpError as error:
-            logger.error(f"An error occurred fetching attachment {attachment_id} for message {message_id} for user {user_id}: {error}")
-            return None
+            if error.resp.status == 401 or error.resp.status == 403:
+                logger.warning(f"Auth error fetching attachment {attachment_id} for msg {message_id} (user {user_id}): {error}")
+                raise AuthenticationError(f"Gmail API permission error for attachment {attachment_id}: {error}") from error
+            elif error.resp.status == 404:
+                logger.warning(f"Attachment {attachment_id} not found for msg {message_id} (user {user_id}): {error}")
+                raise ResourceNotFoundError(f"Attachment {attachment_id} not found for message {message_id}.") from error
+            elif error.resp.status == 429:
+                logger.warning(f"Rate limit hit fetching attachment {attachment_id} (user {user_id}): {error}")
+                raise RateLimitError("Gmail API rate limit exceeded") from error
+            else:
+                logger.error(f"HTTP error fetching attachment {attachment_id} (user {user_id}): {error}")
+                raise ExternalServiceError(f"Gmail API error fetching attachment: {error}") from error
+        except (ConfigurationError, AuthenticationError, ExternalServiceError) as e:
+             # Propagate errors from getting the service
+             raise e
+        except (KeyError, TypeError, base64.binascii.Error) as e: # Catch potential decoding errors
+            logger.error(f"Error decoding attachment data for attachment {attachment_id} (user {user_id}): {e}")
+            raise ExternalServiceError(f"Failed to decode attachment data: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error fetching attachment {attachment_id} for message {message_id} for user {user_id}: {e}")
-            return None
+            logger.error(f"Unexpected error fetching attachment {attachment_id} (user {user_id}): {e}")
+            raise GmailAutomationError(f"Unexpected error fetching attachment: {e}") from e

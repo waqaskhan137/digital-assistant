@@ -1,296 +1,128 @@
 # Active Context
 
 ## Current Focus
-We have just completed Phase 3 of our code refactoring initiative, focusing on SOLID principles. The primary goal was to improve the design of the Email Service by introducing interfaces and applying dependency inversion and the strategy pattern.
+We're currently focusing on improving the robustness and reliability of our authentication service, particularly around error handling, token management, and OAuth flows. Our recent work has centered on:
 
-The audit categorized issues according to fundamental software engineering principles:
-- Meaningful Naming
-- Single Responsibility & Modularity
-- DRY (Don't Repeat Yourself)
-- KISS (Keep It Simple, Stupid)
-- SOLID Principles
-- Encapsulation & Information Hiding
-- Side-Effect Analysis
-- Error Handling & Validation
-- Readability & Formatting
-
-We've successfully completed Phases 1, 2, and 3, significantly improving the Email Service structure.
+1. Standardizing error handling across all services
+2. Fixing failing authentication service tests
+3. Implementing comprehensive exception testing patterns
+4. Enhancing OAuth security with proper state parameter validation
 
 ## Recent Changes
 
-### Phase 1: Single Responsibility & Meaningful Naming
-- Refactored GmailClient into smaller, focused classes:
-  - GmailApiClient: For raw API interactions
-  - EmailNormalizer: For converting Gmail format to internal format
-  - EmailContentExtractor: For handling MIME content, attachments, etc.
-  - GmailClient now serves as a facade coordinating these components
-- Extracted TokenManager from AuthClient for better separation of concerns
-- Improved naming consistency throughout the codebase
-- Created focused utility modules for reusable functionality
+### Error Handling Standardization
+We've implemented a centralized exception hierarchy in `shared/exceptions.py` that provides consistent error handling across all services. This includes:
 
-### Phase 2: DRY & KISS Principles
-- Created reusable retry decorator in shared/utils/retry.py
-- Standardized error handling for Redis operations
-- Simplified email querying logic with extraction of common patterns
-- Added Redis operation helpers for consistent initialization
-- Removed magic numbers with named constants
-- Implemented consistent error handling patterns
-- Simplified token caching logic with a declarative approach
+- Base custom exception as the root of all custom exceptions
+- Specific exception types for different error scenarios (ResourceNotFoundError, ValidationError, etc.)
+- Standardized exception-to-HTTP response mapping in FastAPI handlers
+- Rich context information in exception instances for better debugging
 
-### Phase 3: SOLID Principles (Completed)
-- Created interface definitions for core Email Service components:
-  - `IEmailFetcher`
-  - `IEmailNormalizer`
-  - `IContentExtractor`
-- Implemented concrete classes adhering to these interfaces:
-  - `GmailApiClient` implements `IEmailFetcher`.
-  - `EmailNormalizer` implements `IEmailNormalizer` and depends on `IContentExtractor`.
-  - `EmailContentExtractor` implements `IContentExtractor`.
-- Implemented the Strategy pattern for adaptive polling:
-  - Defined `PollingStrategy` interface.
-  - Created `FixedPollingStrategy` and `AdaptivePollingStrategy`.
-  - `SyncStateManager` now depends on `PollingStrategy` interface.
-- Verified changes with the full test suite (113 tests passed).
+### Auth Service Test Fixes
+We've fixed several failing tests in the auth service:
 
-### Phase 4: Encapsulation & Side Effects (Completed)
-- Redis client in `SyncStateManager` is now fully private (no public property or direct access).
-- Methods with side effects in `SyncStateManager` are clearly named (e.g., `update_sync_metrics_in_redis`, `set_sync_status_in_redis`).
-- `AuthClient` now separates pure cache retrieval (`get_user_token`) from side-effectful fetching (`get_and_cache_user_token`).
-- All usages and tests updated to match the new API.
-- Public API surfaces reviewed and minimized for all affected components.
+1. Fixed token storage tests that were failing due to incorrect mock configuration
+2. Updated OAuth client tests to properly handle exception cases
+3. Implemented proper cleanup in tests that were leaving state behind
+4. Added tests for new exception handling patterns
 
-## Current Tasks
-With Phase 3 complete, we are now preparing for Phase 4: Encapsulation & Side Effects.
+### OAuth Security Enhancements
+We've improved our OAuth implementation with several security enhancements:
+
+1. Implemented state parameter validation to prevent CSRF attacks
+2. Added comprehensive error handling for all OAuth failure modes
+3. Improved token expiration management with proper refresh handling
 
 ## Next Steps
-1. **Phase 4: Encapsulation & Side Effects**
-   - Review public API surfaces of all classes (especially refactored Email Service components).
-   - Minimize exposure of implementation details (e.g., make Redis client private in `SyncStateManager`).
-   - Clarify side effects in method names (e.g., in `SyncStateManager` and `AuthClient`).
-   - Separate pure functions from those with side effects where appropriate.
 
-2. Phase 5: Error Handling & Validation
-   - Standardize error handling across all services
-   - Implement proper input validation
-   - Create custom exception hierarchy
+1. **Complete Auth Service Improvements**:
+   - Finish implementing exception handlers in the auth service
+   - Add comprehensive logging around authentication failures
+   - Implement rate limiting for token requests to prevent abuse
 
-In parallel, we need to continue development on:
-- Classification Service
-- Response Generation Service
-- Draft Management Service
+2. **Extend Error Handling Pattern**:
+   - Apply the standardized exception pattern to all remaining services
+   - Update tests to use the new exception testing patterns
+   - Add documentation for the error handling architecture
 
-## Key Decisions & Preferences
-1. We've decided to focus on refactoring the Email Service first, as it's the most critical and complex component
-2. We're prioritizing test coverage for all refactored components
-3. We're standardizing on a dependency injection approach for all services
-4. We're creating clear interfaces to allow for multiple implementations where appropriate (Completed in Phase 3).
-5. For error handling, we're adopting a structured approach with custom exceptions
-6. We're standardizing on the Strategy pattern for variable behaviors (Implemented for polling in Phase 3).
+3. **Email Service Integration**:
+   - Connect Email Service with Auth Service using the new token management system
+   - Implement proper error handling for Gmail API client failures
+   - Add retry mechanisms for transient failures
 
-## Project Insights
-The code audit has revealed patterns that need addressing across the entire codebase:
-1. Large classes with too many responsibilities
-2. Inconsistent error handling approaches
-3. Tight coupling between components
-4. Duplicate code in similar operations
-5. Side effects that aren't clearly communicated
+4. **Testing Framework Improvements**:
+   - Enhance test fixtures to support the new exception testing patterns
+   - Add integration tests that verify correct error propagation between services
+   - Implement test coverage reporting to identify gaps
 
-Addressing these patterns systematically will not only improve the existing code but establish better practices for future development. We're seeing particular benefit from extracting common utilities and applying consistent patterns across services.
-- SOLID principles provide a strong foundation for designing maintainable and testable software components.
-- Interface Segregation leads to more focused and usable component APIs.
-- Dependency Inversion significantly improves testability by allowing mock implementations.
-- The Strategy pattern makes components like the polling mechanism extensible without modification.
+## Active Decisions & Considerations
 
-## Recent Decisions
-- Finalized Python with FastAPI as the technology stack for all microservices
-- Chosen to follow a pure microservices approach with single responsibility per service
-- Decided to implement TDD as the core development methodology
-- Selected RabbitMQ for asynchronous communication between services
-- Defined a clear microservice boundary for each component
-- **Updated FastAPI implementations to use modern lifespan handlers instead of deprecated on_event patterns**
-- **Enhanced Auth Service with improved OAuth flow including state parameter support for secure authentication**
-- **Implemented comprehensive Email Ingestion Service with Gmail API integration**
-- **Added support for HTML to text conversion and attachment handling**
-- **Implemented resumable sync mechanism with Redis state tracking**
-- **Set up RabbitMQ integration for message publishing to downstream services**
-- **Created a three-tiered testing approach for Email Service (unit, integration, performance)**
-- **Implemented test organization pattern with shared fixtures in conftest.py**
-- **Established performance benchmarks for email processing operations**
-- **Completed Phase 1 of the code audit refactoring, focusing on Single Responsibility and Meaningful Naming**
-- **Refactored GmailClient into smaller, focused classes following SRP**
-- **Created TokenManager to separate token management from authentication logic**
-- **Improved naming consistency across the codebase**
-- **Created focused utility modules for reusable functionality**
-- **Completed Phase 2 of the code audit refactoring, focusing on DRY & KISS principles**
-- **Created reusable retry decorator for API calls to eliminate duplicated retry logic**
-- **Improved email querying logic with extraction of common helper methods**
-- **Implemented Redis operation helpers for standardized error handling and initialization**
-- **Added named constants to replace magic numbers for better code clarity**
-- **Completed comprehensive code audit with prioritized findings and recommendations**
-- **Organized code audit findings by first principles (SRP, DRY, KISS, SOLID, etc.)**
-- **Identified key refactoring opportunities for Email Service components**
-- **Created a detailed plan for implementing SOLID principles in Phase 3 refactoring**
-- **Completed Phase 3 of the code audit refactoring (SOLID Principles)**
-  - **Implemented interfaces for Email Service components (IEmailFetcher, IEmailNormalizer, IContentExtractor)**
-  - **Applied Dependency Inversion Principle to Email Service components**
-  - **Implemented Strategy pattern for polling interval calculation**
+### Error Handling Strategy
+We've decided to use a centralized exception hierarchy rather than service-specific exceptions. This ensures consistency across services and simplifies API response generation. Key considerations:
 
-## Resolved Questions
-- Language/framework: Python/FastAPI for all microservices
-- Email ingestion: Implemented polling with adaptive intervals based on email volume
-- AI provider: Will use OpenAI GPT initially with adapter pattern for flexibility
-- Database approach: Service-specific data stores with shared PostgreSQL for user preferences
-- Deployment: Docker Compose for development, Kubernetes for production
-- **Auth Service implementation: Successfully completed with OAuth 2.0 flow and token management**
-- **Docker containerization: Successfully implemented with proper context and shared module access**
-- **Email Ingestion Service implementation: Completed with Gmail API integration and content processing**
-- **Gmail API integration: Resolved userId handling by using "me" special value for authenticated user**
-- **Inter-service authentication: Email Service successfully retrieves tokens from Auth Service**
-- **Email content extraction: Implemented with support for different MIME types and HTML conversion**
-- **State management: Implemented Redis-based sync state tracking for resumable operations**
-- **Email Service testing methodology: Comprehensive testing with multiple test types**
-- **Test mocking approach: Using pytest-mock for dependency mocking**
-- **Performance requirements: Email Service can process 5000+ emails efficiently**
-- **Code quality standards: Established clear guidelines based on first principles**
-- **Refactoring approach: Organized by principle rather than by component**
-- **SOLID Principles implementation: Successfully completed for Email Service components**
+- All exceptions inherit from a base custom exception
+- Exceptions include rich context for debugging
+- FastAPI exception handlers map exceptions to HTTP responses
+- Services raise specific exception types rather than returning status codes
 
-## Current Priorities
-1. ✅ Set up project structure following microservices architecture
-2. ✅ Establish TDD workflow and testing frameworks
-3. ✅ Implement Auth Service with OAuth 2.0 flow
-4. ✅ Manually test Auth Service to verify OAuth flow and token storage
-5. ✅ Create Email Ingestion Service with Gmail API integration
-6. ✅ Implement Phase 1 of code audit refactoring (Single Responsibility & Meaningful Naming)
-7. ✅ Implement Phase 2 of code audit refactoring (DRY & KISS Principles)
-8. ✅ Complete comprehensive code audit with findings document
-9. ✅ Implement Phase 3 of code audit refactoring (SOLID Principles):
-   - ✅ Extract interfaces for Gmail API interactions
-   - ✅ Implement dependency injection for components
-   - ✅ Apply Interface Segregation Principle to large classes
-   - ✅ Reorganize inheritance hierarchies if needed
-10. ⚠️ Enhance Email Ingestion Service with testing and optimization:
-   - ✅ Add unit tests for key components (GmailClient, Rate Limiter)
-   - ✅ Add unit tests for refactored components (EmailContentExtractor, GmailApiClient, etc.)
-   - ❌ Implement integration tests for end-to-end flows
-   - ❌ Add performance tests for large volumes
-   - ❌ Optimize batch processing capabilities
-   - ❌ Achieve >80% test coverage
-11. **Develop Classification Service:**
-   - Create test suite for classification functionality
-   - Implement rule-based classification engine
-   - Add ML-based classification capabilities (future)
-12. Build Response Generation Service
-13. Implement Draft Management Service
-14. Create API Gateway for service coordination
-15. ⚠️ **Implement Phase 4 of code audit refactoring (Encapsulation & Side Effects)**
+### Token Management Strategy
+We're using Redis for token storage with a comprehensive token management approach:
 
-## Implementation Insights
-- Each microservice will be developed independently following TDD
-- Service contracts must be clearly defined before implementation
-- Mock external dependencies (Gmail API, OpenAI) for testing
-- Use Docker Compose to orchestrate services locally during development
-- Implement correlation IDs for request tracing across services
-- **FastAPI's lifespan handlers provide a cleaner approach to application startup/shutdown events**
-- **Redis provides effective token storage with appropriate serialization/deserialization**
-- **Docker containerization requires careful management of build context and shared modules**
-- **OAuth flow requires proper state parameter handling for security and user identification**
-- **Email Ingestion requires careful rate limiting to stay within Gmail API quotas**
-- **Adaptive polling frequency can optimize email processing based on user email volume**
-- **When working with Gmail API, use "me" as userId rather than internal user IDs**
-- **Inter-service authentication via token retrieval works well with the microservices architecture**
-- **The GmailClient class effectively abstracts Gmail API complexity from the rest of the Email Service**
-- **HTML to text conversion requires careful handling to preserve important formatting**
-- **Batch processing with proper rate limiting is essential for Gmail API quota management**
-- **Redis-based state tracking enables reliable resumable operations**
-- **Separation of test types (unit, integration, performance) improves test organization and maintenance**
-- **Shared test fixtures reduce code duplication and improve test clarity**
-- **Parametrized testing in pytest allows for comprehensive test coverage with minimal code**
-- **Performance testing with large datasets is essential for services that handle high volume data**
-- **Mock objects must be configured to represent realistic scenarios for effective testing**
-- **Integration tests provide confidence in end-to-end functionality that unit tests cannot**
-- **Refactoring for Single Responsibility Principle greatly improved code organization**
-- **Breaking down large classes into smaller, focused components enhances maintainability**
-- **Creating dedicated utility modules increases code reuse across services**
-- **TokenManager separation simplified Auth functionality and improved testing**
-- **Consistent naming conventions reduce cognitive load and improve code readability**
-- **Explicit method names that include return value units improve API clarity**
-- **Gmail API client functionality is cleaner when split into focused responsibilities**
-- **Test coverage for refactored components confirms functionality is preserved**
-- **Following SRP makes unit testing simpler and more focused**
-- **Decorator pattern is highly effective for centralizing cross-cutting concerns like retry logic**
-- **Common helper methods significantly reduce code duplication and improve maintainability**
-- **Redis operations are simplified with a standardized approach to error handling**
-- **Using a central handler for async Redis operations ensures consistent initialization**
-- **Named constants make code more readable and easier to maintain than magic numbers**
-- **Tests are critical when refactoring to verify functionality is preserved**
-- **Extraction of common patterns improves code consistency across components**
-- **First principles approach to code quality provides clear guidelines for refactoring**
-- **Code quality improves most dramatically when addressing multiple related principles together**
-- **SOLID principles provide a strong foundation for designing maintainable software components**
-- **Interface Segregation creates more focused APIs that are easier to use correctly**
-- **Dependency Inversion enables better testing by allowing mock implementations**
-- **Open/Closed Principle encourages extension through abstraction rather than modification**
+- Tokens are stored with user_id as the key
+- Automatic refresh mechanism for expired tokens
+- Clear separation between token storage and OAuth client logic
+- Proper error handling for token retrieval and refresh failures
 
-## Email Ingestion Service Parameters
-- **Batch Size**: 100 emails per request (default), configurable between 10-500
-- **Time Period**: 
-  - Initial sync: 30 days by default (configurable 7-90 days)
-  - Incremental updates: Since last successful sync timestamp
-- **Polling Frequency**:
-  - Default: Every 5 minutes
-  - Adaptive based on volume: 2 min (high), 5 min (medium), 15 min (low)
-  - Configurable range: 1-60 minutes
-- **Rate Limiting**:
-  - Limit to 200 quota units per second (under Gmail's 250 limit)
-  - Implement Redis-based token bucket algorithm
-  - Exponential backoff for 429 responses
-  - Circuit breaker pattern for repeated failures
-- **Error Handling**:
-  - Retry up to 3 times with exponential backoff
-  - Dead-letter queue for repeatedly failed processing
-  - Store last successful email ID for resuming interrupted syncs
-- **Gmail API Integration**:
-  - Use "me" as userId for all Gmail API requests
-  - Use internal user IDs only for token retrieval from Auth Service
-  - Maintain clear separation between internal and external identifiers
-- **Content Processing**:
-  - Support for multiple MIME types
-  - HTML to text conversion with formatting preservation
-  - Attachment handling and metadata extraction
-  - Email normalization for consistent processing
-- **Testing Parameters**:
-  - Unit test coverage: >80% for each component
-  - Integration test coverage: All critical paths tested
-  - Performance benchmarks: Process 5000+ emails efficiently
-  - Concurrent user simulation: 5+ simultaneous users
+### Testing Strategy
+We've developed a comprehensive testing strategy for our authentication and error handling code:
 
-## TDD Implementation Approach
-- Start with test suite setup for each microservice
-- Define clear test cases before writing implementation code
-- Use pytest fixtures to mock external dependencies
-- Aim for high test coverage (minimum 80%)
-- Implement continuous integration to run tests automatically
-- Organize tests by type (unit, integration, performance)
-- Use shared fixtures for common test setup
-- Implement performance benchmarks for critical operations
+- Unit tests for all components with proper mocking
+- Integration tests that verify end-to-end flows
+- Exception testing patterns to verify error handling
+- Test fixtures that support common testing scenarios
 
-## User Preferences
-- System should prioritize transparency in how emails are processed
-- Users should maintain full control over sent communications
-- Interface should be intuitive and require minimal configuration
-- Clear visibility into the classification and response generation process
+## Important Patterns and Preferences
 
-## Technical Considerations
-- Security and privacy are paramount given the sensitive nature of email data
-- Performance optimization needed for real-time email processing
-- Service boundaries must be well-defined to maintain clear separation of concerns
-- Error handling must be robust with proper fallback mechanisms
-- Monitoring and observability across services essential for production deployment
-- OAuth flow must include state parameter for security and proper user identification
-- Email ingestion must implement adaptive rate control and quota management
-- Proper authentication handling between microservices is essential for security
-- Content processing must handle various email formats and encodings
-- State management must be reliable for resumable operations
-- Testing must cover all critical functionality and edge cases
-- Performance testing must validate behavior under real-world conditions
+### Code Structure
+- Services follow a clear separation of concerns between routes, business logic, and data access
+- Dependency injection is used for all external dependencies
+- Configuration is loaded from environment variables with proper validation
+- Interfaces define the contract for implementations
+
+### Error Handling
+- Use specific exception types for different error scenarios
+- Include rich context in exceptions for debugging
+- Let exceptions propagate to the appropriate handler
+- Configure FastAPI exception handlers for consistent responses
+
+### Testing
+- Mock external dependencies in unit tests
+- Use fixtures for common testing scenarios
+- Test both success and failure paths
+- Verify exception raising and handling
+
+## Learnings and Insights
+
+### Error Handling Complexity
+We've learned that comprehensive error handling is more complex than initially anticipated. Key insights:
+
+- Different external services (Gmail API, OAuth providers) have varied error responses
+- Mapping external errors to our internal exception hierarchy requires careful consideration
+- Exception context needs to be rich enough for debugging but sanitized for API responses
+- Consistent error handling across services requires disciplined implementation
+
+### OAuth Security Considerations
+Our work on OAuth security has highlighted several important considerations:
+
+- State parameter validation is essential for preventing CSRF attacks
+- Token refresh logic needs robust error handling
+- Error responses from OAuth providers can be inconsistent
+- Secure storage of tokens requires careful implementation
+
+### Testing Challenges
+We've encountered several challenges in testing our authentication code:
+
+- Mocking Redis and OAuth providers requires careful setup
+- Testing exception paths requires specific testing patterns
+- Integration tests need proper cleanup to avoid state leakage
+- Test fixtures need to be flexible enough to support different scenarios

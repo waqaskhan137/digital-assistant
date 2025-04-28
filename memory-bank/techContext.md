@@ -143,3 +143,42 @@ gmail-automation/
 ## API Documentation
 - Each microservice will expose OpenAPI documentation
 - Service contracts will be clearly defined and versioned
+
+## Error Handling Approach
+
+### Custom Exception Hierarchy
+1. **Base Custom Exception**
+   - Root exception for all custom exceptions
+   - Ensures consistent handling across the application
+
+2. **Resource Not Found Error**
+   - Raised when a requested resource doesn't exist
+   - Maps to HTTP 404 in API responses
+
+3. **Validation Error**
+   - Raised for input validation failures
+   - Maps to HTTP 400 in API responses
+
+4. **External Service Error**
+   - Raised when external services (Google, OpenAI) fail
+   - Maps to HTTP 502 in API responses
+   - Includes details about the external service and failure
+
+5. **Authentication Error**
+   - Raised for authentication failures
+   - Maps to HTTP 401 in API responses
+
+6. **Configuration Error**
+   - Raised when configuration is missing or invalid
+   - Maps to HTTP 500 in API responses
+
+### Exception Handling Pattern
+- Routes raise specific exception types rather than returning status codes
+- Global exception handlers convert exceptions to standardized HTTP responses
+- Tests verify that routes raise the correct exceptions
+- Mock objects configured to raise specific exceptions in tests
+- Error responses include:
+  - Error type (for programmatic handling)
+  - Human-readable message
+  - Additional context (when available)
+  - Correlation ID (for tracing)

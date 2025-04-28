@@ -275,3 +275,173 @@ After completing Phase 1 of the code audit refactoring, the Email Service has be
 - Rate limiting to respect Gmail API quotas
 - Caching to reduce API calls
 - Stateless services where possible
+
+## Error Handling
+- A custom exception hierarchy is defined in `shared/exceptions.py`.
+- All project-specific errors should inherit from `GmailAutomationError`.
+- Specific exceptions exist for common scenarios like `AuthenticationError`, `ConfigurationError`, `ValidationError`, `ExternalServiceError`, `ResourceNotFoundError`, `RateLimitError`, `EmailProcessingError`, and `SyncStateError`.
+- Error handling within services should catch specific custom exceptions where possible and translate external library exceptions into appropriate custom exceptions.
+- FastAPI exception handlers should be used at the API boundary to convert custom exceptions into standardized HTTP error responses.
+
+# System Architecture & Patterns
+
+## High-Level Architecture
+
+Our Gmail automation project follows a microservices architecture, consisting of six discrete services:
+
+1. **Auth Service**: Handles OAuth 2.0 authentication with Google and token management
+2. **Email Service**: Manages email ingestion, communication with Gmail API, and email synchronization
+3. **Classification Service**: Analyzes emails for classification and prioritization
+4. **Response Service**: Generates appropriate responses using AI
+5. **Draft Service**: Manages draft creation and editing
+6. **API Gateway**: Provides a unified API for frontend interactions
+
+## System Components
+
+```mermaid
+graph TD
+    Client[Client Application] --> Gateway[API Gateway]
+    
+    Gateway --> Auth[Auth Service]
+    Gateway --> Email[Email Service]
+    Gateway --> Class[Classification Service]
+    Gateway --> Response[Response Service]
+    Gateway --> Draft[Draft Service]
+    
+    Auth --> Google[Google OAuth]
+    Email --> GmailAPI[Gmail API]
+    Email --> Auth
+    Email --> MQ[RabbitMQ]
+    
+    MQ --> Class
+    Class --> MQ
+    
+    MQ --> Response
+    Response --> OpenAI[OpenAI API]
+    Response --> MQ
+    
+    MQ --> Draft
+    Draft --> GmailAPI
+```
+
+## Design Patterns & Technical Decisions
+
+### 1. Authentication & Authorization
+
+**OAuth 2.0 Flow**:
+- Standard OAuth 2.0 authorization code flow with Google
+- Enhanced security with state parameter
+- Token storage in Redis with TTL-based expiration
+- Refresh token management
+- Proper exception handling with clear error responses
+
+The Auth Service implements the following patterns:
+- **Repository Pattern** for token storage
+- **Factory Pattern** for creating OAuth clients
+- **Dependency Injection** for better testability
+- **Custom Exception Hierarchy** with specific exception types
+- **Exception Handler** mapping exceptions to appropriate HTTP status codes
+
+Key security measures:
+- State parameter validation to prevent CSRF attacks
+- Redis-based token storage with TTL
+- Secure token exchange with Google
+- Proper error handling for authentication failures
+
+Implementing proper exception handling:
+- Custom exception types in `shared/exceptions.py`
+- Routes raising specific exceptions for error cases
+- FastAPI exception handlers mapping exceptions to appropriate HTTP status codes
+- Consistent error response format
+
+### 2. Email Processing Pipeline
+
+// ...existing code...
+
+### 3. Classification System
+
+// ...existing code...
+
+### 4. Response Generation
+
+// ...existing code...
+
+### 5. Draft Management
+
+// ...existing code...
+
+## Cross-Cutting Concerns
+
+### Exception Handling
+
+We've implemented a standardized approach to error handling across services:
+
+1. **Custom Exception Hierarchy**:
+   - `BaseCustomException`: Root exception all custom exceptions inherit from
+   - `ConfigurationError`: For configuration-related issues
+   - `ResourceNotFoundError`: When a requested resource doesn't exist
+   - `ValidationError`: For input validation failures
+   - `ExternalServiceError`: For failures in external service communication
+   - `AuthenticationError`: For authentication-related issues
+
+2. **FastAPI Exception Handlers**:
+   - Global exception handlers registered at application startup
+   - Map specific exception types to appropriate HTTP status codes
+   - Convert exceptions to consistent error response format
+   - Preserve error context for better troubleshooting
+
+3. **Exception Raising Pattern**:
+   - Routes explicitly raise appropriate exception types
+   - No direct status code returns in route handlers
+   - Exception context includes detailed information for debugging
+   - Consistent exception types across all services
+
+4. **Exception Testing**:
+   - Tests verify that routes raise the correct exceptions
+   - Mock objects configured to raise specific exceptions
+   - Test expectations aligned with defined exception mappings
+   - Comprehensive testing of error scenarios
+
+### Dependency Injection
+
+// ...existing code...
+
+### Retry & Resilience Patterns
+
+// ...existing code...
+
+## Testing Strategy
+
+// ...existing code...
+
+## Communication Patterns
+
+// ...existing code...
+
+## Performance Considerations
+
+// ...existing code...
+
+## Security Patterns
+
+// ...existing code...
+
+## Deployment Model
+
+// ...existing code...
+
+## Monitoring & Observability
+
+// ...existing code...
+
+## Data Flow Diagrams
+
+// ...existing code...
+
+## Interface Contracts
+
+// ...existing code...
+
+## Evolution & Extensibility
+
+// ...existing code...

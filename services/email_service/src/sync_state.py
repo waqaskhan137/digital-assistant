@@ -1,13 +1,14 @@
 import logging
 import json
 import asyncio
-from typing import Dict, Any, Optional, List, Callable, TypeVar, cast
+from typing import Dict, Any, Optional, List, Callable, TypeVar, cast, Coroutine
 from datetime import datetime
 import redis.asyncio as redis
 import functools
 
 from services.email_service.src.interfaces.polling_strategy import PollingStrategy
 from services.email_service.src.strategies.volume_based_polling import VolumeBasedPollingStrategy
+from shared.exceptions import SyncStateError, ConfigurationError, GmailAutomationError
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,21 @@ class SyncStateManager:
             return
             
         try:
-            self._redis = redis.from_url(self.redis_url)
+            self._redis = redis.from_url(
+                self.redis_url, 
+                decode_responses=True, 
+                socket_connect_timeout=5
+            )
             # Test connection
             await self._redis.ping()
             self._initialized = True
             logger.info("Sync state manager initialized with Redis")
+        except redis.exceptions.ConnectionError as e:
+            logger.error(f"Failed to connect to Redis during initialization: {e}")
+            raise ConfigurationError(f"Failed to connect to Redis: {e}") from e
         except Exception as e:
             logger.error(f"Failed to initialize Redis connection: {str(e)}")
-            raise
+            raise ConfigurationError(f"Redis initialization failed: {e}") from e
     
     async def close(self):
         """Close Redis connection."""
@@ -61,29 +69,37 @@ class SyncStateManager:
         """
         if not self._initialized:
             await self.initialize()
+        if not self._redis:
+            raise ConfigurationError("Redis client is not available after initialization attempt.")
         return self._redis
     
     def _get_user_key(self, user_id: str, key_type: str) -> str:
         """Generate a Redis key for a user with a specific type."""
         return f"{self.key_prefix}{user_id}:{key_type}"
     
-    async def _redis_operation(self, operation: Callable, default_value: T, error_message: str) -> T:
+    async def _redis_operation(self, operation: Callable[[], Coroutine[Any, Any, T]], error_message: str) -> T:
         """
         Helper method to execute Redis operations with proper error handling.
-        
-        Args:
-            operation: Async callable that performs the Redis operation
-            default_value: Value to return if operation fails
-            error_message: Message to log if operation fails
-            
-        Returns:
-            Result of the operation or default_value if it fails
+        Raises SyncStateError for operational issues.
+        Raises ConfigurationError if Redis is not initialized.
         """
         try:
-            return await operation()
+            redis_client = await self._get_redis()
+            return await operation(redis_client)
+        except redis.exceptions.ConnectionError as e:
+            logger.error(f"{error_message} (ConnectionError): {e}")
+            raise SyncStateError(f"Redis connection error: {error_message}") from e
+        except redis.exceptions.TimeoutError as e:
+            logger.error(f"{error_message} (TimeoutError): {e}")
+            raise SyncStateError(f"Redis timeout: {error_message}") from e
+        except redis.exceptions.RedisError as e:
+            logger.error(f"{error_message} (RedisError): {e}")
+            raise SyncStateError(f"Redis operational error: {error_message}") from e
+        except ConfigurationError:
+            raise
         except Exception as e:
-            logger.error(f"{error_message}: {str(e)}")
-            return default_value
+            logger.error(f"{error_message} (Unexpected Error): {e}")
+            raise GmailAutomationError(f"Unexpected error during Redis operation: {error_message}") from e
     
     async def save_sync_state(self, user_id: str, sync_state: Dict[str, Any]) -> bool:
         """
@@ -96,21 +112,24 @@ class SyncStateManager:
         Returns:
             True if successful, False otherwise
         """
-        # Add timestamp for tracking
         sync_state["last_updated"] = datetime.now().isoformat()
         key = self._get_user_key(user_id, "state")
         
-        async def operation():
-            redis_client = await self._get_redis()
-            await redis_client.set(key, json.dumps(sync_state))
-            logger.info(f"Saved sync state for user {user_id}")
-            return True
+        async def operation(redis_client):
+            try:
+                state_json = json.dumps(sync_state)
+                await redis_client.set(key, state_json)
+                logger.info(f"Saved sync state for user {user_id}")
+                return True
+            except TypeError as e:
+                logger.error(f"Failed to serialize sync state for user {user_id}: {e}")
+                raise SyncStateError(f"Invalid sync state data for user {user_id}") from e
             
-        return await self._redis_operation(
+        await self._redis_operation(
             operation, 
-            False, 
             f"Failed to save sync state for user {user_id}"
         )
+        return True
     
     async def get_sync_state(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -124,16 +143,18 @@ class SyncStateManager:
         """
         key = self._get_user_key(user_id, "state")
         
-        async def operation():
-            redis_client = await self._get_redis()
+        async def operation(redis_client):
             state_json = await redis_client.get(key)
             if state_json:
-                return json.loads(state_json)
+                try:
+                    return json.loads(state_json)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode sync state JSON for user {user_id}: {e}. Data: {state_json}")
+                    raise SyncStateError(f"Corrupted sync state data found for user {user_id}") from e
             return None
             
         return await self._redis_operation(
             operation,
-            None,
             f"Failed to get sync state for user {user_id}"
         )
     
@@ -155,17 +176,21 @@ class SyncStateManager:
             "timestamp": timestamp
         }
         
-        async def operation():
-            redis_client = await self._get_redis()
-            await redis_client.set(key, json.dumps(data))
-            logger.info(f"Saved last message ID {message_id} for user {user_id}")
-            return True
+        async def operation(redis_client):
+            try:
+                data_json = json.dumps(data)
+                await redis_client.set(key, data_json)
+                logger.info(f"Saved last message ID {message_id} for user {user_id}")
+                return True
+            except TypeError as e:
+                logger.error(f"Failed to serialize last message ID data for user {user_id}: {e}")
+                raise SyncStateError(f"Invalid last message ID data for user {user_id}") from e
             
-        return await self._redis_operation(
+        await self._redis_operation(
             operation,
-            False,
             f"Failed to save last message ID for user {user_id}"
         )
+        return True
     
     async def get_last_message_id(self, user_id: str) -> Optional[str]:
         """
@@ -179,17 +204,19 @@ class SyncStateManager:
         """
         key = self._get_user_key(user_id, "last_message")
         
-        async def operation():
-            redis_client = await self._get_redis()
+        async def operation(redis_client):
             data_json = await redis_client.get(key)
             if data_json:
-                data = json.loads(data_json)
-                return data.get("message_id")
+                try:
+                    data = json.loads(data_json)
+                    return data.get("message_id")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode last message ID JSON for user {user_id}: {e}. Data: {data_json}")
+                    raise SyncStateError(f"Corrupted last message ID data found for user {user_id}") from e
             return None
             
         return await self._redis_operation(
             operation,
-            None,
             f"Failed to get last message ID for user {user_id}"
         )
     
@@ -207,28 +234,30 @@ class SyncStateManager:
         metrics["timestamp"] = datetime.now().isoformat()
         key = self._get_user_key(user_id, "metrics")
         
-        async def operation():
-            redis_client = await self._get_redis()
+        async def operation(redis_client):
+            try:
+                metrics_json = await redis_client.get(key)
+                metrics_list = json.loads(metrics_json) if metrics_json else []
+                
+                metrics_list.append(metrics)
+                if len(metrics_list) > 10:
+                    metrics_list = metrics_list[-10:]
+                
+                await redis_client.set(key, json.dumps(metrics_list))
+                logger.info(f"Recorded sync metrics for user {user_id}: {metrics}")
+                return True
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode sync metrics JSON for user {user_id}: {e}. Data: {metrics_json}")
+                raise SyncStateError(f"Corrupted sync metrics data found for user {user_id}") from e
+            except TypeError as e:
+                logger.error(f"Failed to serialize sync metrics for user {user_id}: {e}")
+                raise SyncStateError(f"Invalid sync metrics data for user {user_id}") from e
             
-            # Get existing metrics list or create new one
-            metrics_json = await redis_client.get(key)
-            metrics_list = json.loads(metrics_json) if metrics_json else []
-            
-            # Add new metrics and limit to last 10
-            metrics_list.append(metrics)
-            if len(metrics_list) > 10:
-                metrics_list = metrics_list[-10:]
-            
-            # Save updated list
-            await redis_client.set(key, json.dumps(metrics_list))
-            logger.info(f"Recorded sync metrics for user {user_id}: {metrics}")
-            return True
-            
-        return await self._redis_operation(
+        await self._redis_operation(
             operation,
-            False,
             f"Failed to record sync metrics for user {user_id}"
         )
+        return True
     
     async def get_sync_metrics(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -242,16 +271,18 @@ class SyncStateManager:
         """
         key = self._get_user_key(user_id, "metrics")
         
-        async def operation():
-            redis_client = await self._get_redis()
+        async def operation(redis_client):
             metrics_json = await redis_client.get(key)
             if metrics_json:
-                return json.loads(metrics_json)
+                try:
+                    return json.loads(metrics_json)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode sync metrics JSON for user {user_id}: {e}. Data: {metrics_json}")
+                    raise SyncStateError(f"Corrupted sync metrics data found for user {user_id}") from e
             return []
             
         return await self._redis_operation(
             operation,
-            [],
             f"Failed to get sync metrics for user {user_id}"
         )
     
@@ -272,14 +303,12 @@ class SyncStateManager:
         Returns:
             Recommended polling interval in minutes
         """
-        default_interval = 5 # Keep a default fallback
+        default_interval = 5
         
-        async def operation():
-            # Get the latest sync metrics
+        try:
             metrics_list = await self.get_sync_metrics(user_id)
             latest_metrics = metrics_list[-1] if metrics_list else None
             
-            # Use the injected strategy to calculate the optimal interval
             calculated_interval = self.polling_strategy.calculate_interval(
                 user_id=user_id,
                 sync_metrics=latest_metrics,
@@ -287,12 +316,12 @@ class SyncStateManager:
                 user_preference_minutes=user_preference_minutes
             )
             return calculated_interval
-                
-        return await self._redis_operation(
-            operation,
-            default_interval,
-            f"Error calculating polling interval for user {user_id}, using default {default_interval}"
-        )
+        except (SyncStateError, ConfigurationError) as e:
+            logger.warning(f"Error getting sync metrics for polling interval calculation for user {user_id}: {e}. Using default {default_interval} min.")
+            return default_interval
+        except Exception as e:
+            logger.error(f"Error calculating polling interval via strategy for user {user_id}: {e}. Using default {default_interval} min.")
+            return default_interval
     
     async def set_sync_status_in_redis(self, user_id: str, status: str, details: Dict[str, Any] = None) -> bool:
         """
@@ -315,17 +344,21 @@ class SyncStateManager:
         if details:
             status_data["details"] = details
             
-        async def operation():
-            redis_client = await self._get_redis()
-            await redis_client.set(key, json.dumps(status_data))
-            logger.info(f"Set sync status to '{status}' for user {user_id}")
-            return True
+        async def operation(redis_client):
+            try:
+                status_json = json.dumps(status_data)
+                await redis_client.set(key, status_json)
+                logger.info(f"Set sync status to '{status}' for user {user_id}")
+                return True
+            except TypeError as e:
+                logger.error(f"Failed to serialize sync status for user {user_id}: {e}")
+                raise SyncStateError(f"Invalid sync status data for user {user_id}") from e
             
-        return await self._redis_operation(
+        await self._redis_operation(
             operation,
-            False,
             f"Failed to set sync status for user {user_id}"
         )
+        return True
     
     async def get_sync_status(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -339,15 +372,17 @@ class SyncStateManager:
         """
         key = self._get_user_key(user_id, "status")
         
-        async def operation():
-            redis_client = await self._get_redis()
+        async def operation(redis_client):
             status_json = await redis_client.get(key)
             if status_json:
-                return json.loads(status_json)
+                try:
+                    return json.loads(status_json)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode sync status JSON for user {user_id}: {e}. Data: {status_json}")
+                    raise SyncStateError(f"Corrupted sync status data found for user {user_id}") from e
             return None
             
         return await self._redis_operation(
             operation,
-            None,
             f"Failed to get sync status for user {user_id}"
         )

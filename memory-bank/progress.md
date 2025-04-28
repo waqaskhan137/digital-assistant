@@ -23,6 +23,12 @@
   - Verified OAuth 2.0 flow with Google
   - Confirmed token storage in Redis
   - Validated callback handling and token exchange
+- ✅ Fixed failing tests in Auth Service:
+  - Updated exception handling to use custom exceptions
+  - Ensured routes raise appropriate exception types
+  - Aligned test expectations with exception handler mappings
+  - Implemented proper error handling for OAuth callback route
+  - All 19 tests now pass successfully
 
 ### Email Ingestion Service
 - ✅ Implemented Email Ingestion Service with Gmail API integration:
@@ -82,12 +88,36 @@
    - ✅ Developed strategy pattern for adaptive polling interval.
    - ✅ Verified changes with full test suite (113 tests passed).
 
+5. ✅ **Phase 4: Encapsulation & Side Effects**
+   - Completed implementation:
+     - ✅ Minimized exposure of implementation details
+     - ✅ Made helper methods private where appropriate
+     - ✅ Clarified side effects in method names
+     - ✅ Separated pure functions from those with side effects
+   - ✅ Made Redis client in `SyncStateManager` fully private
+   - ✅ Renamed methods with side effects to clearly indicate their purpose
+   - ✅ Separated pure cache retrieval from side-effectful fetching in `AuthClient`
+   - ✅ Updated all usages and tests to match the new API
+   - ✅ Reviewed and minimized public API surfaces for all affected components
+
+6. 🔄 **Phase 5: Error Handling & Validation**
+   - ✅ Created custom exception hierarchy in `shared/exceptions.py`
+   - ✅ Standardized error handling in Auth Service with FastAPI exception handlers
+   - ✅ Fixed failing Auth Service tests by implementing proper exception handling
+   - ✅ Updated routes to raise specific exceptions rather than returning status codes
+   - ✅ Applied standardized error handling in Email Service
+   - ✅ Implemented input validation using Pydantic models
+   - ❌ Pending end-to-end error scenario testing
+
 ### Testing Framework
 - Defined testing strategy for each microservice
 - Created example test cases for core functionality
 - Established mocking approach for external dependencies
 - Planned test coverage requirements
-- Successfully implemented and validated Auth Service tests
+- ✅ Successfully implemented and validated Auth Service tests:
+  - Fixed failing tests by updating exception handling
+  - Ensured tests correctly verify exception cases
+  - 19 tests now pass successfully
 - ✅ Successfully implemented tests for refactored components:
   - 4 tests for EmailContentExtractor
   - 2 tests for EmailNormalizer
@@ -116,6 +146,13 @@
    - Designing rule-based classification engine
    - Planning ML integration for future enhancements
 
+3. 🔄 **Phase 5: Error Handling & Validation**
+   - Implementing standardized error handling across all services
+   - Creating custom exception hierarchy
+   - Applying consistent exception handling patterns
+   - Improving error responses with detailed context information
+   - Implementing circuit breaker pattern for external service errors
+
 ## Upcoming Work
 1. ⚠️ **Response Generation Service**
    - Design service contracts and API
@@ -135,25 +172,19 @@
    - Create service discovery mechanism
    - Develop request routing and transformation logic
 
-4. ⚠️ **Phase 4: Encapsulation & Side Effects**
-   - Review public API surfaces of all classes
-   - Minimize exposure of implementation details
-   - Make helper methods private where appropriate
-   - Clarify side effects in method names
-   - Separate pure functions from those with side effects
-
-5. ⚠️ **Phase 5: Error Handling & Validation**
-   - Standardize error handling across all services
-   - Implement proper input validation
-   - Create custom exception hierarchy
-   - Improve error messaging and context information
-   - Implement circuit breaker pattern for external services
+4. ⚠️ **Phase 6: Enhanced Testing & Documentation**
+   - Implement comprehensive integration tests
+   - Add performance tests for critical components
+   - Improve API documentation
+   - Complete internal code documentation
+   - Update shared module documentation
 
 ## Technical Debt & Known Issues
 1. 🐞 **Error handling inconsistencies across services**
    - Different error handling patterns make debugging harder
    - Need consistent approach to error propagation
    - Phase 5 will address this systematically
+   - Auth Service error handling has been improved as a model for other services
 
 2. 🐞 **Incomplete test coverage in Email Service**
    - Unit tests exist but integration tests are incomplete
@@ -223,6 +254,14 @@
 - **Interface Segregation creates more focused APIs that are easier to use correctly**
 - **Dependency Inversion enables better testing by allowing mock implementations**
 - **Open/Closed Principle encourages extension through abstraction rather than modification**
+- **FastAPI exception handlers provide a clean way to centralize error response formatting**
+- **Routes should raise specific exceptions rather than handling them directly or returning status codes**
+- **Exception types should map logically to HTTP status codes for consistent API behavior**
+- **Auth routes should explicitly raise custom exceptions for error cases rather than returning error responses**
+- **Tests should verify that routes raise the correct exceptions, not just check response status codes**
+- **OAuth callback routes need special error handling for external service interactions**
+- **Mock objects in tests should be configured to raise specific exceptions rather than returning error responses**
+- **Custom exceptions should include detailed context information for better error messages**
 
 ## Performance Metrics
 - Current test coverage is below target of 80%
@@ -231,3 +270,6 @@
 - Need proper locking or transaction support
 - Shared modules lack comprehensive documentation
 - Need API documentation and usage examples
+- All 19 Auth Service tests now pass successfully
+- Email Service error handling has been standardized but still needs more comprehensive testing
+- Exception handling in FastAPI routes has been improved for consistency
