@@ -57,11 +57,11 @@ class OAuthClient:
         }
         return f"{self.auth_url}?{urlencode(params)}"
 
-    def exchange_code_for_token(self, auth_code):
+    def exchange_code_for_token(self, authorization_code):
         """Exchange the authorization code for an access token.
         
         Args:
-            auth_code (str): Authorization code from OAuth consent
+            authorization_code (str): Authorization code from OAuth consent
             
         Returns:
             Token: Token object containing access and refresh tokens
@@ -69,7 +69,7 @@ class OAuthClient:
         data = {
             "client_id": self.client_id,
             "client_secret": self.client_secret,
-            "code": auth_code,
+            "code": authorization_code,
             "redirect_uri": self.redirect_uri,
             "grant_type": "authorization_code"
         }

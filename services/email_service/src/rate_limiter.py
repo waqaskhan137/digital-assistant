@@ -112,21 +112,21 @@ class TokenBucketRateLimiter:
         
         # Calculate tokens to add
         periods_passed = time_passed // self.refill_time
-        tokens_to_add = periods_passed * self.refill_rate
+        rate_limit_tokens_to_add = periods_passed * self.refill_rate
         
-        if tokens_to_add <= 0:
+        if rate_limit_tokens_to_add <= 0:
             return
         
         # Add tokens up to max_tokens
         current_tokens = await self._get_current_tokens()
-        new_tokens = min(current_tokens + tokens_to_add, self.max_tokens)
+        new_tokens = min(current_tokens + rate_limit_tokens_to_add, self.max_tokens)
         
         # Update token count and last refill time
         self.redis.set(f"{self.bucket_name}:tokens", str(new_tokens), ex=None)
         self.redis.set(f"{self.bucket_name}:last_refill", str(current_time), ex=None)
         
         logger.debug(
-            f"Refilled {tokens_to_add} tokens. New total: {new_tokens}/{self.max_tokens}"
+            f"Refilled {rate_limit_tokens_to_add} tokens. New total: {new_tokens}/{self.max_tokens}"
         )
     
     async def reset_bucket(self) -> None:

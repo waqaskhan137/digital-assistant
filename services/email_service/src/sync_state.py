@@ -215,7 +215,7 @@ class SyncStateManager:
             logger.error(f"Failed to get sync metrics for user {user_id}: {str(e)}")
             return []
     
-    async def calculate_optimal_polling_interval(self, user_id: str) -> int:
+    async def calculate_optimal_polling_interval_minutes(self, user_id: str) -> int:
         """
         Calculate optimal polling interval based on email volume patterns.
         

@@ -3,10 +3,10 @@ Client for interacting with the Authentication Service.
 This module provides a client for making API calls to the Auth Service.
 """
 import os
-import time
-import httpx
 import logging
+import httpx
 from typing import Dict, Any, Optional
+from shared.utils.token_manager import TokenManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -21,25 +21,26 @@ class AuthClient:
     
     Attributes:
         base_url: Base URL for the Auth Service
-        token_cache: In-memory cache of user tokens
+        token_manager: Manager for token caching and expiry
     """
     
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, buffer_seconds: int = 300):
         """
         Initialize the Auth client.
         
         Args:
             base_url: Base URL for the Auth Service (default: from environment variable)
+            buffer_seconds: Buffer time in seconds before expiry to consider a token expired
         """
         self.base_url = base_url or os.getenv("AUTH_SERVICE_URL", "http://auth-service:8000")
-        self.token_cache = {}  # Dictionary to cache tokens by user_id
+        self.token_manager = TokenManager(buffer_seconds=buffer_seconds)
         logger.info(f"Auth client initialized with base URL: {self.base_url}")
     
     async def get_user_token(self, user_id: str) -> Dict[str, Any]:
         """
         Get the OAuth token for a user.
         
-        Checks the in-memory cache first and only makes an HTTP request
+        Checks the token cache first and only makes an HTTP request
         if the token is not cached or has expired.
         
         Args:
@@ -52,16 +53,9 @@ class AuthClient:
             Exception: If the token cannot be retrieved
         """
         # Check if we have a valid cached token
-        if user_id in self.token_cache:
-            cached_token = self.token_cache[user_id]
-            current_time = time.time()
-            
-            # Check if token is still valid (with 5-minute buffer)
-            if cached_token.get('expiry_time', 0) > current_time + 300:
-                logger.info(f"Using cached token for user {user_id}")
-                return cached_token
-            else:
-                logger.info(f"Cached token for user {user_id} is expired or close to expiry")
+        cached_token = self.token_manager.get_cached_token(user_id)
+        if cached_token:
+            return cached_token
         
         # No valid cached token, fetch from auth service
         url = f"{self.base_url}/auth/token/{user_id}"
@@ -73,22 +67,8 @@ class AuthClient:
                 response.raise_for_status()
                 token_data = response.json()
                 
-                # Cache the token with expiry time
-                if 'expires_in' in token_data:
-                    # Calculate absolute expiry time from relative expires_in
-                    expiry_time = time.time() + token_data['expires_in']
-                    token_data['expiry_time'] = expiry_time
-                else:
-                    # If no expires_in field, set a default expiry (30 minutes)
-                    expiry_time = time.time() + 1800
-                    token_data['expiry_time'] = expiry_time
-                    logger.warning(f"Token for user {user_id} missing expires_in field, setting default 30-minute expiry")
-                
-                # Store in cache
-                self.token_cache[user_id] = token_data
-                logger.info(f"Token cached for user {user_id}, expires in {(expiry_time - time.time())/60:.1f} minutes")
-                
-                return token_data
+                # Cache the token with the token manager
+                return self.token_manager.cache_token(user_id, token_data)
         except Exception as e:
             logger.error(f"Error getting token for user {user_id}: {str(e)}")
             raise
@@ -115,22 +95,8 @@ class AuthClient:
                 response.raise_for_status()
                 token_data = response.json()
                 
-                # Update cache with new token
-                if 'expires_in' in token_data:
-                    # Calculate absolute expiry time
-                    expiry_time = time.time() + token_data['expires_in']
-                    token_data['expiry_time'] = expiry_time
-                else:
-                    # If no expires_in field, set a default expiry (30 minutes)
-                    expiry_time = time.time() + 1800
-                    token_data['expiry_time'] = expiry_time
-                    logger.warning(f"Refreshed token for user {user_id} missing expires_in field, setting default 30-minute expiry")
-                
-                # Store in cache
-                self.token_cache[user_id] = token_data
-                logger.info(f"Refreshed token cached for user {user_id}, expires in {(expiry_time - time.time())/60:.1f} minutes")
-                
-                return token_data
+                # Cache the refreshed token with the token manager
+                return self.token_manager.cache_token(user_id, token_data)
         except Exception as e:
             logger.error(f"Error refreshing token for user {user_id}: {str(e)}")
             raise
@@ -143,9 +109,6 @@ class AuthClient:
             user_id: User identifier to clear cache for, or None to clear all
         """
         if user_id:
-            if user_id in self.token_cache:
-                del self.token_cache[user_id]
-                logger.info(f"Cleared token cache for user {user_id}")
+            self.token_manager.clear_token(user_id)
         else:
-            self.token_cache.clear()
-            logger.info("Cleared token cache for all users")
+            self.token_manager.clear_all_tokens()
