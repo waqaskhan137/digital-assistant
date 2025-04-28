@@ -68,7 +68,7 @@ class AuthClient:
                 logger.info(f"{log_message} for user {user_id}")
                 
                 # Dynamically choose the HTTP method
-                if http_method.lower() == "post":
+                if (http_method.lower() == "post"):
                     response = await client.post(url)
                 else:
                     response = await client.get(url)
@@ -82,12 +82,23 @@ class AuthClient:
             logger.error(f"Error fetching token for user {user_id}: {str(e)}")
             raise
     
-    async def get_user_token(self, user_id: str) -> Dict[str, Any]:
+    def get_user_token(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get the OAuth token for a user.
+        Pure retrieval of the OAuth token for a user from the cache.
+        No side effects.
         
-        Checks the token cache first and only makes an HTTP request
-        if the token is not cached or has expired.
+        Args:
+            user_id: User identifier (usually email address)
+            
+        Returns:
+            Cached token dictionary or None if not present/expired
+        """
+        return self.token_manager.get_cached_token(user_id)
+
+    async def get_and_cache_user_token(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get the OAuth token for a user, fetching and caching if not present or expired.
+        Side effect: may update the cache.
         
         Args:
             user_id: User identifier (usually email address)
@@ -98,7 +109,6 @@ class AuthClient:
         Raises:
             Exception: If the token cannot be retrieved
         """
-        # Check if we have a valid cached token
         cached_token = self.token_manager.get_cached_token(user_id)
         if cached_token:
             return cached_token

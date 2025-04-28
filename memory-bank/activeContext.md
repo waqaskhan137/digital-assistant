@@ -52,6 +52,13 @@ We've successfully completed Phases 1, 2, and 3, significantly improving the Ema
   - `SyncStateManager` now depends on `PollingStrategy` interface.
 - Verified changes with the full test suite (113 tests passed).
 
+### Phase 4: Encapsulation & Side Effects (Completed)
+- Redis client in `SyncStateManager` is now fully private (no public property or direct access).
+- Methods with side effects in `SyncStateManager` are clearly named (e.g., `update_sync_metrics_in_redis`, `set_sync_status_in_redis`).
+- `AuthClient` now separates pure cache retrieval (`get_user_token`) from side-effectful fetching (`get_and_cache_user_token`).
+- All usages and tests updated to match the new API.
+- Public API surfaces reviewed and minimized for all affected components.
+
 ## Current Tasks
 With Phase 3 complete, we are now preparing for Phase 4: Encapsulation & Side Effects.
 
