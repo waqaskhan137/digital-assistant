@@ -23,16 +23,14 @@ class SyncStateManager:
     def __init__(
         self, 
         redis_url: str, 
-        key_prefix: str = "email_sync:",
-        polling_strategy: Optional[PollingStrategy] = None
+        polling_strategy: PollingStrategy, # Depend on interface
+        key_prefix: str = "email_sync:"
     ):
         self.redis_url = redis_url
         self.key_prefix = key_prefix
         self._redis = None
         self._initialized = False
-        
-        # Set polling strategy, defaulting to volume-based if not provided
-        self.polling_strategy = polling_strategy or VolumeBasedPollingStrategy()
+        self.polling_strategy = polling_strategy # Use injected strategy
     
     async def initialize(self):
         """Initialize Redis connection."""
@@ -56,11 +54,10 @@ class SyncStateManager:
             self._initialized = False
             logger.info("Redis connection closed")
     
-    @property
-    async def redis(self):
+    async def _get_redis(self):
         """
         Get the Redis client, initializing if necessary.
-        This property ensures Redis is always initialized before use.
+        This method ensures Redis is always initialized before use.
         """
         if not self._initialized:
             await self.initialize()
@@ -104,7 +101,7 @@ class SyncStateManager:
         key = self._get_user_key(user_id, "state")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             await redis_client.set(key, json.dumps(sync_state))
             logger.info(f"Saved sync state for user {user_id}")
             return True
@@ -128,7 +125,7 @@ class SyncStateManager:
         key = self._get_user_key(user_id, "state")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             state_json = await redis_client.get(key)
             if state_json:
                 return json.loads(state_json)
@@ -159,7 +156,7 @@ class SyncStateManager:
         }
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             await redis_client.set(key, json.dumps(data))
             logger.info(f"Saved last message ID {message_id} for user {user_id}")
             return True
@@ -183,7 +180,7 @@ class SyncStateManager:
         key = self._get_user_key(user_id, "last_message")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             data_json = await redis_client.get(key)
             if data_json:
                 data = json.loads(data_json)
@@ -196,9 +193,9 @@ class SyncStateManager:
             f"Failed to get last message ID for user {user_id}"
         )
     
-    async def record_sync_metrics(self, user_id: str, metrics: Dict[str, Any]) -> bool:
+    async def update_sync_metrics_in_redis(self, user_id: str, metrics: Dict[str, Any]) -> bool:
         """
-        Record metrics from a sync operation for adaptive polling.
+        Update metrics from a sync operation for adaptive polling (side effect: modifies Redis).
         
         Args:
             user_id: The user ID
@@ -207,12 +204,11 @@ class SyncStateManager:
         Returns:
             True if successful, False otherwise
         """
-        # Add current timestamp
         metrics["timestamp"] = datetime.now().isoformat()
         key = self._get_user_key(user_id, "metrics")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             
             # Get existing metrics list or create new one
             metrics_json = await redis_client.get(key)
@@ -247,7 +243,7 @@ class SyncStateManager:
         key = self._get_user_key(user_id, "metrics")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             metrics_json = await redis_client.get(key)
             if metrics_json:
                 return json.loads(metrics_json)
@@ -259,38 +255,48 @@ class SyncStateManager:
             f"Failed to get sync metrics for user {user_id}"
         )
     
-    async def calculate_optimal_polling_interval_minutes(self, user_id: str) -> int:
+    async def calculate_optimal_polling_interval_minutes(
+        self, 
+        user_id: str,
+        current_interval: int, # Pass current interval
+        user_preference_minutes: Optional[int] = None # Pass user preference
+    ) -> int:
         """
         Calculate optimal polling interval based on the configured polling strategy.
         
         Args:
             user_id: The user ID
+            current_interval: The current polling interval in minutes.
+            user_preference_minutes: Optional user-defined interval preference.
             
         Returns:
             Recommended polling interval in minutes
         """
-        # Default interval (5 minutes)
-        default_interval = 5
+        default_interval = 5 # Keep a default fallback
         
         async def operation():
-            # Get metrics history
-            metrics = await self.get_sync_metrics(user_id)
+            # Get the latest sync metrics
+            metrics_list = await self.get_sync_metrics(user_id)
+            latest_metrics = metrics_list[-1] if metrics_list else None
             
-            if not metrics:
-                return default_interval
-            
-            # Use the strategy to calculate the optimal interval
-            return await self.polling_strategy.calculate_polling_interval_minutes(metrics)
+            # Use the injected strategy to calculate the optimal interval
+            calculated_interval = self.polling_strategy.calculate_interval(
+                user_id=user_id,
+                sync_metrics=latest_metrics,
+                current_interval=current_interval,
+                user_preference_minutes=user_preference_minutes
+            )
+            return calculated_interval
                 
         return await self._redis_operation(
             operation,
             default_interval,
-            f"Error calculating polling interval for user {user_id}"
+            f"Error calculating polling interval for user {user_id}, using default {default_interval}"
         )
     
-    async def set_sync_status(self, user_id: str, status: str, details: Dict[str, Any] = None) -> bool:
+    async def set_sync_status_in_redis(self, user_id: str, status: str, details: Dict[str, Any] = None) -> bool:
         """
-        Set the current sync status for a user.
+        Set the current sync status for a user (side effect: modifies Redis).
         
         Args:
             user_id: The user ID
@@ -310,7 +316,7 @@ class SyncStateManager:
             status_data["details"] = details
             
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             await redis_client.set(key, json.dumps(status_data))
             logger.info(f"Set sync status to '{status}' for user {user_id}")
             return True
@@ -334,7 +340,7 @@ class SyncStateManager:
         key = self._get_user_key(user_id, "status")
         
         async def operation():
-            redis_client = await self.redis
+            redis_client = await self._get_redis()
             status_json = await redis_client.get(key)
             if status_json:
                 return json.loads(status_json)

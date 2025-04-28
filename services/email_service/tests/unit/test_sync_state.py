@@ -180,7 +180,7 @@ class TestSyncStateManager:
         mock_redis.get.return_value = json.dumps(existing_metrics)
         
         # Call the method
-        result = await sync_manager.record_sync_metrics(user_id, metrics)
+        result = await sync_manager.update_sync_metrics_in_redis(user_id, metrics)
         
         # Verify result
         assert result is True
@@ -276,7 +276,7 @@ class TestSyncStateManager:
         details = {"progress": 50}
         
         # Call the method
-        result = await sync_manager.set_sync_status(user_id, status, details)
+        result = await sync_manager.set_sync_status_in_redis(user_id, status, details)
         
         # Verify result
         assert result is True

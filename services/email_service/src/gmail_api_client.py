@@ -1,17 +1,18 @@
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, AsyncGenerator
 from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from .rate_limiter import TokenBucketRateLimiter
 from .auth_utils import convert_token_to_credentials
 from shared.utils.retry import async_retry_on_rate_limit
+from .interfaces.email_fetcher import IEmailFetcher
 import base64
 
 logger = logging.getLogger(__name__)
 
-class GmailApiClient:
+class GmailApiClient(IEmailFetcher):
     """
     Client for direct interactions with the Gmail API.
     
@@ -77,103 +78,100 @@ class GmailApiClient:
         credentials = await self.get_credentials(user_id)
         return build('gmail', 'v1', credentials=credentials)
     
-    async def execute_request_with_rate_limiting(self, request):
-        """
-        Execute a Gmail API request with rate limiting.
-        
-        This is a helper method to abstract the common pattern of
-        acquiring rate limit tokens before executing a request.
-        
-        Args:
-            request: The Gmail API request object to execute
-            
-        Returns:
-            The API response
-        """
-        # Acquire rate limit tokens
-        await self.rate_limiter.acquire_tokens(1)
-        
-        # Execute the request (the retry logic is handled by the decorator)
-        return request.execute()
-    
     # Apply retry decorator to handle rate limiting
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_list(
-        self, user_id: str, query: str = "", page_token: str = None
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        self, user_id: str, query: str = "", max_results: int = 100
+    ) -> List[dict]:
         """
-        Get a list of emails for a user.
+        Fetches a list of email message IDs and thread IDs matching the query.
         
         Args:
             user_id: The user ID to fetch emails for
             query: Gmail search query string (default: "")
-            page_token: Page token for pagination (default: None)
+            max_results: Maximum number of results to return (default: 100)
             
         Returns:
-            Tuple containing:
-                - List of email metadata
-                - Next page token (None if no more pages)
+            List of email message/thread IDs matching the query.
         """
-        # Acquire rate limit tokens
-        await self.rate_limiter.acquire_tokens(1)
-        
-        # Get Gmail API service
+        messages = []
+        page_token = None
         service = await self.get_gmail_service(user_id)
         
-        # Build request
-        request = service.users().messages().list(
-            userId='me',
-            q=query,
-            maxResults=self.batch_size,
-            pageToken=page_token if page_token else None
-        )
-        
-        # Execute request (retry logic handled by decorator)
-        response = request.execute()
-        messages = response.get('messages', [])
-        next_page_token = response.get('nextPageToken')
-        
-        return messages, next_page_token
-    
+        # Loop to handle pagination if needed, up to max_results
+        while len(messages) < max_results:
+            await self.rate_limiter.acquire_tokens(1)
+            try:
+                request = service.users().messages().list(
+                    userId='me',
+                    q=query,
+                    maxResults=min(self.batch_size, max_results - len(messages)),
+                    pageToken=page_token
+                )
+                response = request.execute()
+                found_messages = response.get('messages', [])
+                messages.extend(found_messages)
+                page_token = response.get('nextPageToken')
+                if not page_token:
+                    break
+            except HttpError as error:
+                logger.error(f"An error occurred fetching email list for user {user_id}: {error}")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error fetching email list for user {user_id}: {e}")
+                break
+
+        return messages[:max_results]
+
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_details(
         self, user_id: str, message_id: str
-    ) -> Dict[str, Any]:
+    ) -> Optional[dict]:
         """
-        Get full details for a specific email.
+        Fetches the detailed content of a specific email message.
         
         Args:
             user_id: The user ID to fetch the email for
             message_id: The Gmail message ID
             
         Returns:
-            Dict containing the full email details
+            Dict containing the full email details or None on error.
         """
-        # Acquire rate limit tokens
         await self.rate_limiter.acquire_tokens(1)
-        
-        # Get Gmail API service
-        service = await self.get_gmail_service(user_id)
-        
-        # Build request
-        request = service.users().messages().get(
-            userId='me', 
-            id=message_id,
-            format='full'  # Get the full message
-        )
-        
-        # Execute request (retry logic handled by decorator)
-        return request.execute()
-    
+        try:
+            service = await self.get_gmail_service(user_id)
+            request = service.users().messages().get(
+                userId='me', 
+                id=message_id,
+                format='full'
+            )
+            return request.execute()
+        except HttpError as error:
+            logger.error(f"An error occurred fetching details for message {message_id} for user {user_id}: {error}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching details for message {message_id} for user {user_id}: {e}")
+            return None
+
+    @async_retry_on_rate_limit(max_retries=5, base_delay=1)
+    async def get_emails_batch(
+        self, user_id: str, message_ids: List[str]
+    ) -> AsyncGenerator[Optional[dict], None]:
+        """Fetches details for a batch of email messages asynchronously."""
+        tasks = [self.get_email_details(user_id, msg_id) for msg_id in message_ids]
+        results = await asyncio.gather(*tasks)
+        for result in results:
+            yield result
+
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_attachment(
         self, 
         user_id: str, 
         message_id: str, 
         attachment_id: str
-    ) -> Dict[str, Any]:
+    ) -> Optional[bytes]:
         """
-        Get a specific attachment from an email.
+        Fetches the content of a specific attachment.
         
         Args:
             user_id: The user ID to fetch the attachment for
@@ -181,29 +179,22 @@ class GmailApiClient:
             attachment_id: The attachment ID
             
         Returns:
-            Dict containing the attachment data and metadata
+            Bytes content of the attachment or None on error.
         """
-        # Acquire rate limit tokens
         await self.rate_limiter.acquire_tokens(1)
-        
-        # Get Gmail API service
-        service = await self.get_gmail_service(user_id)
-        
-        # Build request
-        request = service.users().messages().attachments().get(
-            userId='me',
-            messageId=message_id,
-            id=attachment_id
-        )
-        
-        # Execute request (retry logic handled by decorator)
-        response = request.execute()
-        
-        # Decode data
-        data = base64.urlsafe_b64decode(response['data'])
-        
-        return {
-            'data': data,
-            'size': response.get('size', 0),
-            'attachment_id': attachment_id
-        }
+        try:
+            service = await self.get_gmail_service(user_id)
+            request = service.users().messages().attachments().get(
+                userId='me',
+                messageId=message_id,
+                id=attachment_id
+            )
+            response = request.execute()
+            data = base64.urlsafe_b64decode(response['data'])
+            return data
+        except HttpError as error:
+            logger.error(f"An error occurred fetching attachment {attachment_id} for message {message_id} for user {user_id}: {error}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching attachment {attachment_id} for message {message_id} for user {user_id}: {e}")
+            return None

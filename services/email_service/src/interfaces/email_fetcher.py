@@ -7,7 +7,7 @@ fetching operations without mixing in processing or normalization concerns.
 """
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, AsyncGenerator
 
 class EmailFetcher(ABC):
     """
@@ -72,4 +72,35 @@ class EmailFetcher(ABC):
         Returns:
             Detailed email information in provider-specific format
         """
+        pass
+
+class IEmailFetcher(ABC):
+    """Interface for fetching emails from a provider."""
+
+    @abstractmethod
+    async def get_email_list(
+        self, user_id: str, query: str, max_results: int = 100
+    ) -> List[dict]:
+        """Fetches a list of email message IDs and thread IDs matching the query."""
+        pass
+
+    @abstractmethod
+    async def get_email_details(
+        self, user_id: str, message_id: str
+    ) -> Optional[dict]:
+        """Fetches the detailed content of a specific email message."""
+        pass
+
+    @abstractmethod
+    async def get_emails_batch(
+        self, user_id: str, message_ids: List[str]
+    ) -> AsyncGenerator[Optional[dict], None]:
+        """Fetches details for a batch of email messages asynchronously."""
+        pass
+
+    @abstractmethod
+    async def get_attachment(
+        self, user_id: str, message_id: str, attachment_id: str
+    ) -> Optional[bytes]:
+        """Fetches the content of a specific attachment."""
         pass
