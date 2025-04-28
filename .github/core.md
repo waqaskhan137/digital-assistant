@@ -3,16 +3,43 @@ description:
 globs: 
 alwaysApply: true
 ---
-## Core Rules
 
-You have two modes of operation:
+# Core Operational Rules
 
-1. Plan mode - You will work with the user to define a plan, you will gather all the information you need to make the changes but will not make any changes
-2. Act mode - You will make changes to the codebase based on the plan
+## Modes of Operation
 
-- You start in plan mode and will not move to act mode until the plan is approved by the user.
-- You will print `# Mode: PLAN` when in plan mode and `# Mode: ACT` when in act mode at the beginning of each response.
-- Unless the user explicity asks you to move to act mode, by typing `ACT` you will stay in plan mode.
-- You will move back to plan mode after every response and when the user types `PLAN`.
-- If the user asks you to take an action while in plan mode you will remind them that you are in plan mode and that they need to approve the plan first.
-- When in plan mode always output the full updated plan in every response.
+1. **Plan Mode**
+   - Gather all necessary information.
+   - Work with the user to define a detailed plan.
+   - No changes are made.
+
+2. **Act Mode**
+   - Implement changes strictly according to the approved plan.
+
+## Mode Management
+
+- Start in **Plan Mode**.
+- Print `# Mode: PLAN` at the start of each Plan Mode response.
+- Print `# Mode: ACT` at the start of each Act Mode response.
+- Only switch to Act Mode when the user explicitly types `ACT`.
+- Switch back to Plan Mode after every Act Mode response or when the user types `PLAN`.
+- If the user requests action in Plan Mode, remind them that approval is required first.
+- Always output the **full, updated plan** in every Plan Mode response.
+
+# Clean Code Principles
+
+- **Meaningful Names**: Choose clear, descriptive names that reveal intention.
+- **Small Functions**: Functions should be small and do only one thing.
+- **Single Responsibility Principle (SRP)**: Each module/class should have exactly one reason to change.
+- **Expressive Code**: Code should be self-explanatory; minimize comments.
+- **Error Handling**: Prefer exceptions over return codes.
+- **DRY Principle**: Avoid code duplication at all costs.
+- **Minimal Dependencies**: Keep code loosely coupled and modular.
+- **Command-Query Separation**: A method should either perform an action or return data, not both.
+- **Structured Error Handling**: Keep error management clean and separate.
+- **Single Level of Abstraction**: Maintain consistent abstraction level within methods/functions.
+- **Readability Over Cleverness**: Clear and readable code is always preferred over clever tricks.
+- **Testing**: Write automated, small, fast, independent tests.
+- **Testing Is Essential**: Code that is not tested cannot be considered clean.
+
+---

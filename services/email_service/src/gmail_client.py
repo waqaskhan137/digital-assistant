@@ -54,49 +54,25 @@ class GmailClient:
         self.normalizer = EmailNormalizer(content_extractor=self.content_extractor)
         self.batch_size = batch_size
     
-    async def get_emails_since(
-        self, 
-        user_id: str, 
-        since_date: datetime,
-        include_labels: Optional[List[str]] = None,
-        max_emails: int = 1000
+    async def _fetch_emails_with_query(
+        self,
+        user_id: str,
+        query: str,
+        max_emails: int
     ) -> List[Dict[str, Any]]:
         """
-        Get all emails since a given date.
+        Helper method to fetch emails using a specific query with pagination.
+        
+        This reduces duplication between different email fetching methods.
         
         Args:
             user_id: The user ID to fetch emails for
-            since_date: Fetch emails since this date
-            include_labels: This parameter is now ignored (kept for backwards compatibility)
+            query: Gmail search query string
             max_emails: Maximum number of emails to fetch
             
         Returns:
             List of email metadata
         """
-        # Build Gmail search query with no label filtering
-        # We need to be careful with Gmail search operators
-        # Try a simpler approach that's most likely to return results
-        
-        # We're completely ignoring label filtering as requested by the user
-        if include_labels:
-            logger.info("Label filtering is disabled - retrieving all emails regardless of labels")
-        
-        # Build basic query
-        query_parts = []
-        
-        # Add time-based query only if it's not a test account
-        days_ago = (datetime.now() - since_date).days
-        if days_ago > 0:
-            query_parts.append(f"newer_than:{days_ago}d")
-        else:
-            # Fallback to a safer query that should return results
-            query_parts.append("in:anywhere")
-        
-        # Log the query for debugging
-        query = " ".join(query_parts)
-        logger.info(f"Gmail search query: {query}")
-        
-        # Get emails with pagination
         all_emails = []
         page_token = None
         
@@ -127,29 +103,45 @@ class GmailClient:
             if len(all_emails) + self.batch_size > max_emails:
                 logger.info(f"Would exceed maximum emails on next page, stopping.")
                 break
+                
+        return all_emails
+    
+    async def get_emails_since(
+        self, 
+        user_id: str, 
+        since_date: datetime,
+        include_labels: Optional[List[str]] = None,
+        max_emails: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all emails since a given date.
         
-        # If no emails found with the query, try a fallback approach
+        Args:
+            user_id: The user ID to fetch emails for
+            since_date: Fetch emails since this date
+            include_labels: This parameter is now ignored (kept for backwards compatibility)
+            max_emails: Maximum number of emails to fetch
+            
+        Returns:
+            List of email metadata
+        """
+        # Build Gmail search query
+        days_ago = (datetime.now() - since_date).days
+        
+        # Construct primary query for date filtering
+        query = f"newer_than:{max(1, days_ago)}d"
+        logger.info(f"Gmail search query: {query}")
+        
+        # Fetch emails using the query
+        all_emails = await self._fetch_emails_with_query(user_id, query, max_emails)
+        
+        # If no emails found, use a fallback query
         if not all_emails:
-            logger.warning("No emails found with the initial query, trying fallback query")
-            fallback_query = "in:anywhere"  # This should return any emails in the account
+            logger.warning("No emails found with the date-based query, trying fallback query")
+            fallback_query = "in:anywhere"
             logger.info(f"Fallback Gmail search query: {fallback_query}")
             
-            # Reset pagination
-            page_token = None
-            
-            # Try with fallback query
-            while True and len(all_emails) < max_emails:
-                emails, page_token = await self.api_client.get_email_list(
-                    user_id=user_id,
-                    query=fallback_query,
-                    page_token=page_token
-                )
-                
-                logger.info(f"Fallback Gmail API response: found {len(emails)} emails")
-                all_emails.extend(emails)
-                
-                if not page_token or len(all_emails) + self.batch_size > max_emails:
-                    break
+            all_emails = await self._fetch_emails_with_query(user_id, fallback_query, max_emails)
         
         logger.info(f"Retrieved {len(all_emails)} emails since approximately {since_date}")
         return all_emails
@@ -175,40 +167,8 @@ class GmailClient:
         """
         logger.info(f"Fetching up to {max_emails} most recent emails without date filtering")
         
-        # Get emails with pagination
-        all_emails = []
-        page_token = None
-        
-        while True:
-            # Check if we've reached the maximum
-            if len(all_emails) >= max_emails:
-                logger.info(f"Reached maximum of {max_emails} emails")
-                break
-                
-            # Get next page of emails with empty query (returns all emails)
-            emails, page_token = await self.api_client.get_email_list(
-                user_id=user_id,
-                query="",  # Empty query to get all emails
-                page_token=page_token
-            )
-            
-            # Log the response for debugging
-            logger.info(f"Gmail API response for get_all_emails: found {len(emails)} emails on this page")
-            
-            # Add to result list
-            all_emails.extend(emails)
-            
-            # Break if no more pages
-            if not page_token:
-                break
-                
-            # Break if we'd exceed the maximum on the next page
-            if len(all_emails) + self.batch_size > max_emails:
-                logger.info(f"Would exceed maximum emails on next page, stopping.")
-                break
-        
-        logger.info(f"Retrieved {len(all_emails)} total emails with get_all_emails method")
-        return all_emails
+        # Empty query returns all emails, sorted by most recent first
+        return await self._fetch_emails_with_query(user_id, "", max_emails)
     
     async def normalize_messages(
         self, 

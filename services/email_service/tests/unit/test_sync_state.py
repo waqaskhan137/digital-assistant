@@ -219,7 +219,7 @@ class TestSyncStateManager:
         assert result == mock_metrics
     
     @pytest.mark.asyncio
-    async def test_calculate_optimal_polling_interval(self, sync_manager):
+    async def test_calculate_optimal_polling_interval_minutes(self, sync_manager):
         """Test calculating optimal polling interval based on email volume."""
         user_id = "test_user"
         
@@ -233,7 +233,7 @@ class TestSyncStateManager:
             ]
             
             # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval(user_id)
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
             
             # Verify high volume polling interval
             assert interval == 2  # 2 minutes for high volume
@@ -248,7 +248,7 @@ class TestSyncStateManager:
             ]
             
             # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval(user_id)
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
             
             # Verify medium volume polling interval
             assert interval == 5  # 5 minutes for medium volume
@@ -263,7 +263,7 @@ class TestSyncStateManager:
             ]
             
             # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval(user_id)
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
             
             # Verify low volume polling interval
             assert interval == 15  # 15 minutes for low volume

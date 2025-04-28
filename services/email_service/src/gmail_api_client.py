@@ -6,6 +6,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from .rate_limiter import TokenBucketRateLimiter
 from .auth_utils import convert_token_to_credentials
+from shared.utils.retry import async_retry_on_rate_limit
 import base64
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,40 @@ class GmailApiClient:
         
         return credentials
     
+    async def get_gmail_service(self, user_id: str):
+        """
+        Get an authenticated Gmail API service instance.
+        
+        Args:
+            user_id: The user ID to get the service for
+            
+        Returns:
+            Authenticated Gmail API service
+        """
+        credentials = await self.get_credentials(user_id)
+        return build('gmail', 'v1', credentials=credentials)
+    
+    async def execute_request_with_rate_limiting(self, request):
+        """
+        Execute a Gmail API request with rate limiting.
+        
+        This is a helper method to abstract the common pattern of
+        acquiring rate limit tokens before executing a request.
+        
+        Args:
+            request: The Gmail API request object to execute
+            
+        Returns:
+            The API response
+        """
+        # Acquire rate limit tokens
+        await self.rate_limiter.acquire_tokens(1)
+        
+        # Execute the request (the retry logic is handled by the decorator)
+        return request.execute()
+    
+    # Apply retry decorator to handle rate limiting
+    @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_list(
         self, user_id: str, query: str = "", page_token: str = None
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -83,8 +118,7 @@ class GmailApiClient:
         await self.rate_limiter.acquire_tokens(1)
         
         # Get Gmail API service
-        credentials = await self.get_credentials(user_id)
-        service = build('gmail', 'v1', credentials=credentials)
+        service = await self.get_gmail_service(user_id)
         
         # Build request
         request = service.users().messages().list(
@@ -94,28 +128,14 @@ class GmailApiClient:
             pageToken=page_token if page_token else None
         )
         
-        # Execute request with retries
-        for attempt in range(self.max_retries):
-            try:
-                response = request.execute()
-                messages = response.get('messages', [])
-                next_page_token = response.get('nextPageToken')
-                
-                return messages, next_page_token
-                
-            except HttpError as error:
-                # Check if rate limited (429)
-                if error.resp.status == 429 and attempt < self.max_retries - 1:
-                    retry_delay = self.retry_delay * (2 ** attempt)
-                    logger.warning(f"Rate limited. Retrying in {retry_delay} seconds.")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error(f"Error fetching emails: {error}")
-                    raise
+        # Execute request (retry logic handled by decorator)
+        response = request.execute()
+        messages = response.get('messages', [])
+        next_page_token = response.get('nextPageToken')
         
-        # If we reach here, all retries failed
-        raise Exception(f"Failed to fetch emails after {self.max_retries} attempts")
+        return messages, next_page_token
     
+    @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_details(
         self, user_id: str, message_id: str
     ) -> Dict[str, Any]:
@@ -133,8 +153,7 @@ class GmailApiClient:
         await self.rate_limiter.acquire_tokens(1)
         
         # Get Gmail API service
-        credentials = await self.get_credentials(user_id)
-        service = build('gmail', 'v1', credentials=credentials)
+        service = await self.get_gmail_service(user_id)
         
         # Build request
         request = service.users().messages().get(
@@ -143,25 +162,10 @@ class GmailApiClient:
             format='full'  # Get the full message
         )
         
-        # Execute request with retries
-        for attempt in range(self.max_retries):
-            try:
-                response = request.execute()
-                return response
-                
-            except HttpError as error:
-                # Check if rate limited (429)
-                if error.resp.status == 429 and attempt < self.max_retries - 1:
-                    retry_delay = self.retry_delay * (2 ** attempt)
-                    logger.warning(f"Rate limited. Retrying in {retry_delay} seconds.")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error(f"Error fetching email details: {error}")
-                    raise
-        
-        # If we reach here, all retries failed
-        raise Exception(f"Failed to fetch email details after {self.max_retries} attempts")
+        # Execute request (retry logic handled by decorator)
+        return request.execute()
     
+    @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_attachment(
         self, 
         user_id: str, 
@@ -183,8 +187,7 @@ class GmailApiClient:
         await self.rate_limiter.acquire_tokens(1)
         
         # Get Gmail API service
-        credentials = await self.get_credentials(user_id)
-        service = build('gmail', 'v1', credentials=credentials)
+        service = await self.get_gmail_service(user_id)
         
         # Build request
         request = service.users().messages().attachments().get(
@@ -193,29 +196,14 @@ class GmailApiClient:
             id=attachment_id
         )
         
-        # Execute request with retries
-        for attempt in range(self.max_retries):
-            try:
-                response = request.execute()
-                
-                # Decode data
-                data = base64.urlsafe_b64decode(response['data'])
-                
-                return {
-                    'data': data,
-                    'size': response.get('size', 0),
-                    'attachment_id': attachment_id
-                }
-                
-            except HttpError as error:
-                # Check if rate limited (429)
-                if error.resp.status == 429 and attempt < self.max_retries - 1:
-                    retry_delay = self.retry_delay * (2 ** attempt)
-                    logger.warning(f"Rate limited. Retrying in {retry_delay} seconds.")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error(f"Error fetching attachment: {error}")
-                    raise
+        # Execute request (retry logic handled by decorator)
+        response = request.execute()
         
-        # If we reach here, all retries failed
-        raise Exception(f"Failed to fetch attachment after {self.max_retries} attempts")
+        # Decode data
+        data = base64.urlsafe_b64decode(response['data'])
+        
+        return {
+            'data': data,
+            'size': response.get('size', 0),
+            'attachment_id': attachment_id
+        }
