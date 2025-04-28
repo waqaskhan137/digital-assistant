@@ -1,7 +1,7 @@
 import pytest
 import time
 from unittest.mock import patch, MagicMock, call
-from src.rate_limiter import TokenBucketRateLimiter
+from services.email_service.src.rate_limiter import TokenBucketRateLimiter
 
 class TestTokenBucketRateLimiter:
     """Test cases for the TokenBucketRateLimiter class."""

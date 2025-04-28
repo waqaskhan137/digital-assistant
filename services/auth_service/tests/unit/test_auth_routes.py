@@ -45,7 +45,12 @@ class TestAuthRoutes:
         
         # Verify
         assert response.status_code == 200
-        assert response.json() == {"auth_url": auth_url}
+        response_json = response.json()
+        assert "auth_url" in response_json
+        assert response_json["auth_url"] == auth_url
+        # The endpoint also returns a 'state' parameter for tracking the user
+        assert "state" in response_json
+        assert response_json["state"].startswith("test_user_")
         mock_oauth_client.get_authorization_url.assert_called_once()
 
     def test_callback_success(self, client, mock_oauth_client, mock_token_storage):

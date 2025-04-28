@@ -6,10 +6,10 @@ import aio_pika
 import pytest_asyncio
 
 # Import our mock setup first to handle shared module dependencies
-from tests.mock_modules import MockEmailMessage
+from services.email_service.tests.mock_modules import MockEmailMessage
 
 # Now we can safely import the module
-from src.rabbitmq_client import RabbitMQClient
+from services.email_service.src.rabbitmq_client import RabbitMQClient
 
 
 class TestRabbitMQClient:
@@ -47,7 +47,7 @@ class TestRabbitMQClient:
         # Patch aio_pika.connect_robust to return our mock connection
         with patch('aio_pika.connect_robust', AsyncMock(return_value=mock_connection)):
             # Patch EmailMessage
-            with patch('src.rabbitmq_client.EmailMessage', MockEmailMessage):
+            with patch('services.email_service.src.rabbitmq_client.EmailMessage', MockEmailMessage):
                 client = RabbitMQClient("amqp://guest:guest@localhost:5672/")
                 await client.initialize()
                 
@@ -179,7 +179,7 @@ class TestRabbitMQClient:
     async def test_publish_email(self, rabbitmq_client):
         """Test publishing a single email message."""
         # Create test email with patched EmailMessage
-        with patch('src.rabbitmq_client.EmailMessage', MockEmailMessage):
+        with patch('services.email_service.src.rabbitmq_client.EmailMessage', MockEmailMessage):
             email = MockEmailMessage(
                 id="test123",
                 user_id="user123",
@@ -228,7 +228,7 @@ class TestRabbitMQClient:
     async def test_publish_batch(self, rabbitmq_client):
         """Test publishing a batch of email messages."""
         # Create test emails with patched EmailMessage
-        with patch('src.rabbitmq_client.EmailMessage', MockEmailMessage):
+        with patch('services.email_service.src.rabbitmq_client.EmailMessage', MockEmailMessage):
             emails = [
                 MockEmailMessage(
                     id=f"test{i}",
@@ -286,7 +286,7 @@ class TestRabbitMQClient:
         
         # Patch the connections
         with patch('aio_pika.connect_robust', AsyncMock(return_value=mock_connection)):
-            with patch('src.rabbitmq_client.EmailMessage', MockEmailMessage):
+            with patch('services.email_service.src.rabbitmq_client.EmailMessage', MockEmailMessage):
                 # Create client but don't initialize
                 client = RabbitMQClient("amqp://guest:guest@localhost:5672/")
                 
@@ -325,7 +325,7 @@ class TestRabbitMQClient:
         mock_exchange.publish.side_effect = Exception("Publish failed")
         
         # Create test email with patched EmailMessage
-        with patch('src.rabbitmq_client.EmailMessage', MockEmailMessage):
+        with patch('services.email_service.src.rabbitmq_client.EmailMessage', MockEmailMessage):
             email = MockEmailMessage(
                 id="test123",
                 user_id="user123",

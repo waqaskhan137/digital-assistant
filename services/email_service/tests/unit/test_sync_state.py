@@ -3,7 +3,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 import redis.asyncio as redis
-from src.sync_state import SyncStateManager
+from services.email_service.src.sync_state import SyncStateManager
 
 # Import pytest_asyncio for better fixture support
 import pytest_asyncio
