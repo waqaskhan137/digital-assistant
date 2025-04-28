@@ -95,6 +95,96 @@ After completing Phase 1 of the code audit refactoring, the Email Service has be
 - Request routing to appropriate microservices
 - Authentication and authorization enforcement
 
+## Code Quality Principles
+
+### Single Responsibility & Modularity
+- Each microservice has clear, focused responsibilities
+- Components within services follow Single Responsibility Principle:
+  - GmailClient split into multiple focused classes:
+    - GmailClient: Facade that coordinates other components
+    - GmailApiClient: Handles raw API interactions
+    - EmailNormalizer: Converts external to internal format
+    - EmailContentExtractor: Processes email content and attachments
+  - SyncStateManager separated from SyncAnalytics
+  - TokenManager extracted from AuthClient
+- Utility functions organized into dedicated modules:
+  - text_utils.py: Text processing utilities like HTML to text conversion
+  - retry.py: Retry decorators for API resilience
+  - token_manager.py: Token handling utilities
+
+### DRY & KISS Principles
+- Common patterns extracted into reusable components:
+  - Retry decorator handles API rate limiting consistently
+  - Redis operations standardized with helper methods
+  - Common email querying logic extracted to helper methods
+  - Token management centralized in TokenManager
+- Complex logic simplified:
+  - Email querying streamlined with better query construction
+  - Conditional processing flows standardized
+  - Token caching logic simplified with declarative approach
+
+### SOLID Principles (In Progress)
+- Interface Segregation:
+  - Breaking down large interfaces into smaller, focused ones
+  - Creating purpose-specific client interfaces
+- Dependency Inversion:
+  - Components depend on abstractions rather than concrete implementations
+  - Dependency injection for easier testing and flexibility
+- Open/Closed Principle:
+  - Strategy pattern for extensible algorithms
+  - Abstract base classes for extensible components
+
+### Error Handling & Validation
+- Standardized error handling across components
+- Consistent validation approach for inputs
+- Clear error messaging for debugging
+- Proper propagation of errors to appropriate layers
+
+### Testing Strategy
+- Tests written before implementation code
+- Red-Green-Refactor cycle for all components
+- Mocking of external dependencies for unit testing
+- Integration tests for service boundaries
+
+## Design Patterns
+
+### Facade Pattern
+- GmailClient acts as a facade to coordinate:
+  - GmailApiClient for API communication
+  - EmailNormalizer for format conversion
+  - EmailContentExtractor for content processing
+- Provides a simplified interface to complex subsystems
+
+### Decorator Pattern
+- Used for cross-cutting concerns:
+  - async_retry_on_rate_limit decorator handles retries consistently
+  - Avoids code duplication across API methods
+  - Centralizes retry logic and exponential backoff
+
+### Strategy Pattern (In Progress)
+- Being implemented for adaptive polling interval calculation
+- Allows plugging in different algorithms for interval calculation
+- Makes the system extensible without modifying existing code
+
+### Repository Pattern
+- Used for token storage and retrieval
+- Abstracts the data storage mechanism
+- Provides a clean interface for CRUD operations
+
+### Factory Method Pattern
+- Used for creating specialized handlers for different email types
+- Simplifies client code by centralizing creation logic
+
+### Template Method Pattern
+- Base classes define algorithm structure
+- Subclasses implement specific steps
+- Ensures consistent processing flow
+
+### Service Locator Pattern (For dependency injection)
+- Being implemented to support dependency inversion
+- Centralizes service instance creation and management
+- Simplifies testing with mock implementations
+
 ## Service Responsibilities
 
 1. **Auth Service**

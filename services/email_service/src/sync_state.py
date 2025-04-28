@@ -6,6 +6,9 @@ from datetime import datetime
 import redis.asyncio as redis
 import functools
 
+from services.email_service.src.interfaces.polling_strategy import PollingStrategy
+from services.email_service.src.strategies.volume_based_polling import VolumeBasedPollingStrategy
+
 logger = logging.getLogger(__name__)
 
 # Type variable for the return type of the Redis operation
@@ -17,11 +20,19 @@ class SyncStateManager:
     Tracks sync progress, history, and rates to enable resumable operations
     and adaptive polling.
     """
-    def __init__(self, redis_url: str, key_prefix: str = "email_sync:"):
+    def __init__(
+        self, 
+        redis_url: str, 
+        key_prefix: str = "email_sync:",
+        polling_strategy: Optional[PollingStrategy] = None
+    ):
         self.redis_url = redis_url
         self.key_prefix = key_prefix
         self._redis = None
         self._initialized = False
+        
+        # Set polling strategy, defaulting to volume-based if not provided
+        self.polling_strategy = polling_strategy or VolumeBasedPollingStrategy()
     
     async def initialize(self):
         """Initialize Redis connection."""
@@ -250,7 +261,7 @@ class SyncStateManager:
     
     async def calculate_optimal_polling_interval_minutes(self, user_id: str) -> int:
         """
-        Calculate optimal polling interval based on email volume patterns.
+        Calculate optimal polling interval based on the configured polling strategy.
         
         Args:
             user_id: The user ID
@@ -261,31 +272,15 @@ class SyncStateManager:
         # Default interval (5 minutes)
         default_interval = 5
         
-        # Constants for thresholds and intervals
-        HIGH_VOLUME_THRESHOLD = 50
-        MEDIUM_VOLUME_THRESHOLD = 10
-        HIGH_VOLUME_INTERVAL = 2
-        MEDIUM_VOLUME_INTERVAL = 5
-        LOW_VOLUME_INTERVAL = 15
-        
         async def operation():
             # Get metrics history
             metrics = await self.get_sync_metrics(user_id)
             
-            if not metrics or len(metrics) < 3:
+            if not metrics:
                 return default_interval
             
-            # Calculate average email count per sync
-            total_emails = sum(m.get("email_count", 0) for m in metrics)
-            avg_count = total_emails / len(metrics)
-            
-            # Determine volume category and set interval
-            if avg_count > HIGH_VOLUME_THRESHOLD:  # High volume
-                return HIGH_VOLUME_INTERVAL
-            elif avg_count > MEDIUM_VOLUME_THRESHOLD:  # Medium volume
-                return MEDIUM_VOLUME_INTERVAL
-            else:  # Low volume
-                return LOW_VOLUME_INTERVAL
+            # Use the strategy to calculate the optimal interval
+            return await self.polling_strategy.calculate_polling_interval_minutes(metrics)
                 
         return await self._redis_operation(
             operation,
