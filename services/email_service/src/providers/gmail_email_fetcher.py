@@ -133,14 +133,15 @@ class GmailEmailFetcher(EmailFetcher):
         """
         try:
             # Get email list using the Gmail API client
-            email_list = await self.api_client.get_email_list(
+            # The get_email_list method now returns a tuple (messages, next_page_token)
+            messages, _ = await self.api_client.get_email_list(
                 user_id, 
                 query=query, 
                 max_results=max_results
             )
             
-            # Extract and return the messages list
-            return email_list.get("messages", [])
+            # Return the messages list directly
+            return messages
         except Exception as e:
             logger.error(f"Error fetching emails with query '{query}': {str(e)}")
             return []

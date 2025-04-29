@@ -107,10 +107,12 @@ class TestRabbitMQClient:
         mock_connection.channel = AsyncMock(return_value=mock_channel)
         
         # Create a connect function that fails once then succeeds
-        connect_mock = AsyncMock(side_effect=[
-            Exception("Connection refused"),  # First call fails
-            mock_connection                   # Second call succeeds
-        ])
+        connect_mock = AsyncMock()
+        # On first call, raise an exception of type AMQPConnectionError
+        connect_mock.side_effect = [
+            aio_pika.exceptions.AMQPConnectionError("Connection refused"),  # First call fails
+            mock_connection                                                # Second call succeeds
+        ]
         
         # Patch asyncio.sleep to speed up the test
         with patch('asyncio.sleep', AsyncMock()):
@@ -137,8 +139,8 @@ class TestRabbitMQClient:
     @pytest.mark.asyncio
     async def test_initialize_max_retries_exceeded(self):
         """Test that initialization fails after max retries are exceeded."""
-        # Create a connect function that always fails
-        connect_mock = AsyncMock(side_effect=Exception("Connection refused"))
+        # Create a connect function that always fails with AMQPConnectionError
+        connect_mock = AsyncMock(side_effect=aio_pika.exceptions.AMQPConnectionError("Connection refused"))
         
         # Patch asyncio.sleep to speed up the test
         with patch('asyncio.sleep', AsyncMock()):
@@ -151,9 +153,12 @@ class TestRabbitMQClient:
                     retry_delay=0.1
                 )
                 
-                # Initialize client should raise exception
-                with pytest.raises(Exception):
+                # Initialize client should raise ConfigurationError
+                with pytest.raises(Exception) as exc_info:
                     await client.initialize()
+                
+                # Verify the specific exception type
+                assert "Unable to connect to RabbitMQ" in str(exc_info.value)
                 
                 # Verify connect was called max_retries times
                 assert connect_mock.call_count == 3

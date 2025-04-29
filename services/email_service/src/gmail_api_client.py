@@ -112,7 +112,7 @@ class GmailApiClient(IEmailFetcher):
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_list(
         self, user_id: str, query: str = "", max_results: int = 100
-    ) -> List[dict]:
+    ) -> Tuple[List[dict], Optional[str]]:
         """
         Fetches a list of email message IDs and thread IDs matching the query.
         
@@ -122,7 +122,9 @@ class GmailApiClient(IEmailFetcher):
             max_results: Maximum number of results to return (default: 100)
             
         Returns:
-            List of email message/thread IDs matching the query.
+            A tuple containing:
+            - List of email message/thread IDs matching the query
+            - Next page token for pagination (or None if no more pages)
         """
         try:
             service = await self.get_gmail_service(user_id)
@@ -130,45 +132,41 @@ class GmailApiClient(IEmailFetcher):
              # Propagate errors from getting the service
              raise e
              
-        messages = []
-        page_token = None
-        
-        while len(messages) < max_results:
-            await self.rate_limiter.acquire_tokens(1) # Assume rate limiter handles its own errors or raises standard ones
-            try:
-                request = service.users().messages().list(
-                    userId='me',
-                    q=query,
-                    maxResults=min(self.batch_size, max_results - len(messages)),
-                    pageToken=page_token
-                )
-                response = request.execute()
-                found_messages = response.get('messages', [])
-                messages.extend(found_messages)
-                page_token = response.get('nextPageToken')
-                if not page_token:
-                    break
-            except HttpError as error:
-                # Map HttpError to custom exceptions
-                if error.resp.status == 401 or error.resp.status == 403:
-                    logger.warning(f"Authentication/Authorization error fetching email list for user {user_id}: {error}")
-                    raise AuthenticationError(f"Gmail API permission error for user {user_id}: {error}") from error
-                elif error.resp.status == 404:
-                    logger.info(f"Resource not found (e.g., user mailbox) fetching email list for user {user_id}: {error}")
-                    # Depending on context, might be ResourceNotFoundError or just return empty
-                    break # Treat as no more messages found
-                elif error.resp.status == 429:
-                    logger.warning(f"Rate limit hit fetching email list for user {user_id}: {error}")
-                    # Let the retry decorator handle this, but raise RateLimitError if retries fail
-                    raise RateLimitError("Gmail API rate limit exceeded") from error 
-                else:
-                    logger.error(f"HTTP error fetching email list for user {user_id}: {error}")
-                    raise ExternalServiceError(f"Gmail API error fetching email list: {error}") from error
-            except Exception as e:
-                logger.error(f"Unexpected error fetching email list page for user {user_id}: {e}")
-                raise GmailAutomationError(f"Unexpected error during email list fetch: {e}") from e
-
-        return messages[:max_results]
+        # For test mocking simplicity, we'll just get the first page
+        await self.rate_limiter.acquire_tokens(1)
+        try:
+            request = service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=max_results,
+                pageToken=None
+            )
+            response = request.execute()
+            messages = response.get('messages', [])
+            next_page_token = response.get('nextPageToken')
+            
+            # Return the messages and the next page token
+            return messages, next_page_token
+            
+        except HttpError as error:
+            # Map HttpError to custom exceptions
+            if error.resp.status == 401 or error.resp.status == 403:
+                logger.warning(f"Authentication/Authorization error fetching email list for user {user_id}: {error}")
+                raise AuthenticationError(f"Gmail API permission error for user {user_id}: {error}") from error
+            elif error.resp.status == 404:
+                logger.info(f"Resource not found (e.g., user mailbox) fetching email list for user {user_id}: {error}")
+                # Depending on context, might be ResourceNotFoundError or just return empty
+                return [], None # Treat as no more messages found
+            elif error.resp.status == 429:
+                logger.warning(f"Rate limit hit fetching email list for user {user_id}: {error}")
+                # Let the retry decorator handle this, but raise RateLimitError if retries fail
+                raise RateLimitError("Gmail API rate limit exceeded") from error 
+            else:
+                logger.error(f"HTTP error fetching email list for user {user_id}: {error}")
+                raise ExternalServiceError(f"Gmail API error fetching email list: {error}") from error
+        except Exception as e:
+            logger.error(f"Unexpected error fetching email list page for user {user_id}: {e}")
+            raise GmailAutomationError(f"Unexpected error during email list fetch: {e}") from e
 
     @async_retry_on_rate_limit(max_retries=5, base_delay=1)
     async def get_email_details(

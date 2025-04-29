@@ -7,7 +7,7 @@ from datetime import datetime
 
 # Ensure the mock_email_module from previous edit is available
 try:
-    from tests.mock_modules import mock_email_module
+    from .mock_modules import mock_email_module
 except ImportError:
     # If it doesn't exist yet, create it
     mock_email_module = MagicMock()

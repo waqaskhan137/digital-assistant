@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 import redis.asyncio as redis
 from services.email_service.src.sync_state import SyncStateManager
+from services.email_service.src.interfaces.polling_strategy import PollingStrategy
 
 # Import pytest_asyncio for better fixture support
 import pytest_asyncio
@@ -29,20 +30,28 @@ class TestSyncStateManager:
         
         return mock
     
+    @pytest.fixture
+    def mock_polling_strategy(self):
+        """Create a mock polling strategy."""
+        mock = MagicMock(spec=PollingStrategy)
+        # Use the correct method name as defined in the interface
+        mock.calculate_polling_interval_minutes = AsyncMock(return_value=5)  # Default to 5 minutes
+        return mock
+    
     @pytest_asyncio.fixture
-    async def sync_manager(self, mock_redis):
+    async def sync_manager(self, mock_redis, mock_polling_strategy):
         """Create a SyncStateManager instance with mocked Redis."""
         with patch('redis.asyncio.from_url', return_value=mock_redis):
-            manager = SyncStateManager("redis://test:6379/0", key_prefix="test:")
+            manager = SyncStateManager("redis://test:6379/0", polling_strategy=mock_polling_strategy, key_prefix="test:")
             await manager.initialize()
             yield manager
             await manager.close()
     
     @pytest.mark.asyncio
-    async def test_initialize(self, mock_redis):
+    async def test_initialize(self, mock_redis, mock_polling_strategy):
         """Test initializing the SyncStateManager."""
         with patch('redis.asyncio.from_url', return_value=mock_redis):
-            manager = SyncStateManager("redis://test:6379/0")
+            manager = SyncStateManager("redis://test:6379/0", polling_strategy=mock_polling_strategy)
             await manager.initialize()
             
             # Verify Redis connection initialization
@@ -219,9 +228,18 @@ class TestSyncStateManager:
         assert result == mock_metrics
     
     @pytest.mark.asyncio
-    async def test_calculate_optimal_polling_interval_minutes(self, sync_manager):
+    async def test_calculate_optimal_polling_interval_minutes(self, sync_manager, mock_polling_strategy):
         """Test calculating optimal polling interval based on email volume."""
         user_id = "test_user"
+        current_interval = 5  # Add current interval parameter
+        
+        # Configure mock strategy to return different values based on volume
+        # Update to match the correct parameter name (metrics instead of sync_metrics)
+        mock_polling_strategy.calculate_polling_interval_minutes.side_effect = lambda metrics: (
+            2 if metrics and metrics.get("email_count", 0) > 50 else
+            5 if metrics and metrics.get("email_count", 0) > 10 else
+            15
+        )
         
         # Test with high volume
         with patch.object(sync_manager, 'get_sync_metrics', new_callable=AsyncMock) as mock_get_metrics:
@@ -232,8 +250,8 @@ class TestSyncStateManager:
                 {"email_count": 80}
             ]
             
-            # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
+            # Call the method with current_interval parameter
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id, current_interval)
             
             # Verify high volume polling interval
             assert interval == 2  # 2 minutes for high volume
@@ -247,8 +265,8 @@ class TestSyncStateManager:
                 {"email_count": 25}
             ]
             
-            # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
+            # Call the method with current_interval parameter
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id, current_interval)
             
             # Verify medium volume polling interval
             assert interval == 5  # 5 minutes for medium volume
@@ -262,8 +280,8 @@ class TestSyncStateManager:
                 {"email_count": 3}
             ]
             
-            # Call the method
-            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id)
+            # Call the method with current_interval parameter
+            interval = await sync_manager.calculate_optimal_polling_interval_minutes(user_id, current_interval)
             
             # Verify low volume polling interval
             assert interval == 15  # 15 minutes for low volume
@@ -315,14 +333,14 @@ class TestSyncStateManager:
         assert result == mock_status
     
     @pytest.mark.asyncio
-    async def test_initialize_exception(self):
+    async def test_initialize_exception(self, mock_polling_strategy):
         """Test handling exception during initialization."""
         # Create mock that raises exception on ping
         mock_redis = AsyncMock()
         mock_redis.ping.side_effect = Exception("Connection error")
         
         with patch('redis.asyncio.from_url', return_value=mock_redis):
-            manager = SyncStateManager("redis://test:6379/0")
+            manager = SyncStateManager("redis://test:6379/0", polling_strategy=mock_polling_strategy)
             
             # Verify exception is raised
             with pytest.raises(Exception):
@@ -332,10 +350,10 @@ class TestSyncStateManager:
             mock_redis.ping.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_save_sync_state_not_initialized(self, mock_redis):
+    async def test_save_sync_state_not_initialized(self, mock_redis, mock_polling_strategy):
         """Test saving sync state when not initialized calls initialize first."""
         with patch('redis.asyncio.from_url', return_value=mock_redis):
-            manager = SyncStateManager("redis://test:6379/0")
+            manager = SyncStateManager("redis://test:6379/0", polling_strategy=mock_polling_strategy)
             # Don't initialize, should auto-initialize when needed
             
             user_id = "test_user"

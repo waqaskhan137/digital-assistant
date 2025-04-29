@@ -25,6 +25,36 @@ class EmailNormalizer(IEmailNormalizer):
         """
         self.content_extractor = content_extractor
     
+    async def normalize_message(self, user_id: str, message_data: dict) -> Optional[EmailMessage]:
+        """
+        Implement the interface method by delegating to the existing normalize method.
+        
+        Args:
+            user_id: The user ID this message belongs to
+            message_data: The raw message data from Gmail API
+            
+        Returns:
+            EmailMessage object or None if normalization fails
+        """
+        try:
+            return self.normalize(message_data, user_id)
+        except (ValidationError, EmailProcessingError) as e:
+            logger.warning(f"Error normalizing message: {e}")
+            return None
+    
+    async def normalize_messages(self, user_id: str, messages: List[Dict[str, Any]]) -> List[EmailMessage]:
+        """
+        Implement the interface method by delegating to the existing normalize_batch method.
+        
+        Args:
+            user_id: The user ID these messages belong to
+            messages: List of raw messages from Gmail API
+            
+        Returns:
+            List of EmailMessage objects
+        """
+        return self.normalize_batch(messages, user_id)
+    
     def normalize(self, raw_message: Dict[str, Any], user_id: str) -> EmailMessage:
         """
         Convert a raw Gmail API message to our internal EmailMessage format.

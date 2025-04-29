@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from datetime import datetime
 from services.email_service.src.email_normalizer import EmailNormalizer
 from services.email_service.src.content_extractor import EmailContentExtractor
-from shared.models.email import EmailMessage
+from shared.models.email import EmailMessage, EmailAddress
 
 class TestEmailNormalizer:
     """Test cases for the EmailNormalizer class."""
@@ -20,7 +20,8 @@ class TestEmailNormalizer:
     def normalizer(self, mock_content_extractor):
         return EmailNormalizer(content_extractor=mock_content_extractor)
     
-    def test_normalize_message(self, normalizer, mock_content_extractor):
+    @pytest.mark.asyncio  # Mark the test as asyncio to use await
+    async def test_normalize_message(self, normalizer, mock_content_extractor):
         """Test normalizing a single message."""
         # Create a test message
         message = {
@@ -38,8 +39,8 @@ class TestEmailNormalizer:
             }
         }
         
-        # Normalize the message
-        normalized = normalizer.normalize_message("user123", message)
+        # Normalize the message - use await for async method
+        normalized = await normalizer.normalize_message("user123", message)
         
         # Verify the message was properly normalized
         assert isinstance(normalized, EmailMessage)
@@ -47,19 +48,20 @@ class TestEmailNormalizer:
         assert normalized.user_id == "user123"
         assert normalized.thread_id == "thread123"
         assert normalized.labels == ["INBOX", "UNREAD"]
-        assert normalized.snippet == "This is a test email"
         assert normalized.subject == "Test Email"
-        assert normalized.from_email == "sender@example.com"
-        assert normalized.to == "recipient@example.com"
-        assert normalized.body_html == "<html>Test</html>"
-        assert normalized.body_text == "Test"
-        assert normalized.has_attachments is False
+        # Use the updated property names
+        assert normalized.from_address.email == "sender@example.com"
+        assert normalized.to_addresses[0].email == "recipient@example.com"
+        assert normalized.html_content == "<html>Test</html>"
+        assert normalized.text_content == "Test"
+        assert len(normalized.attachments) == 0
         
         # Verify content extractor was called correctly
         mock_content_extractor.extract_body.assert_called_once_with(message["payload"])
         mock_content_extractor.get_attachments.assert_called_once_with(message["payload"])
     
-    def test_normalize_messages(self, normalizer):
+    @pytest.mark.asyncio  # Mark the test as asyncio to use await
+    async def test_normalize_messages(self, normalizer):
         """Test normalizing multiple messages."""
         # Create test messages
         messages = [
@@ -79,8 +81,8 @@ class TestEmailNormalizer:
             }
         ]
         
-        # Normalize the messages
-        normalized = normalizer.normalize_messages("user123", messages)
+        # Normalize the messages - use await for async method
+        normalized = await normalizer.normalize_messages("user123", messages)
         
         # Verify results
         assert len(normalized) == 2

@@ -48,21 +48,39 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Function to run tests for a specific service
+run_service_tests() {
+    service_name=$1
+    echo -e "${BLUE}Running $service_name Service tests...${NC}"
+    cd "services/${service_name}_service" && python -m pytest tests/
+    return $?
+}
+
 # Run the tests based on arguments
 if [ "$run_all" = true ]; then
     echo -e "${BLUE}Running all tests...${NC}"
-    # Only run tests in our services directory, ignoring third-party dependency tests
-    # Use -k "not test_curio" to skip the failing test from sniffio
-    pytest services/ -k "not test_curio"
-    exit_code=$?
+    # Run each service's tests in their own directory to avoid import conflicts
+    
+    echo -e "${BLUE}Running Auth Service tests...${NC}"
+    cd services/auth_service && python -m pytest tests/ && cd ../../
+    auth_result=$?
+    
+    echo -e "${BLUE}Running Email Service tests...${NC}"
+    cd services/email_service && python -m pytest tests/ && cd ../../
+    email_result=$?
+
+    # Determine overall exit code
+    if [ $auth_result -eq 0 ] && [ $email_result -eq 0 ]; then
+        exit_code=0
+    else
+        exit_code=1
+    fi
 else
     if [ "$service" = "auth" ]; then
-        echo -e "${BLUE}Running Auth Service tests...${NC}"
-        pytest services/auth_service/tests/
+        run_service_tests "auth"
         exit_code=$?
     elif [ "$service" = "email" ]; then
-        echo -e "${BLUE}Running Email Service tests...${NC}"
-        pytest services/email_service/tests/
+        run_service_tests "email"
         exit_code=$?
     fi
 fi
