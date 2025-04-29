@@ -1,0 +1,96 @@
+{
+  "rules": [
+    {
+      "name": "Important Client Email",
+      "category": "important",
+      "needs_reply": true,
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "field": "sender",
+            "pattern": "@vip-client.com"
+          },
+          {
+            "field": "sender",
+            "pattern": "@executive-team.com"
+          }
+        ]
+      },
+      "confidence": 0.95,
+      "priority": 3,
+      "explanation": "Email from a VIP client or executive team member"
+    },
+    {
+      "name": "Urgent Request",
+      "category": "important",
+      "needs_reply": true,
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "field": "subject",
+            "pattern": "regex:(?i).*(urgent|asap|immediate|emergency).*"
+          },
+          {
+            "operator": "not",
+            "conditions": [
+              {
+                "field": "sender",
+                "pattern": "@newsletter."
+              }
+            ]
+          }
+        ]
+      },
+      "confidence": 0.8,
+      "priority": 2,
+      "explanation": "Email contains urgent keywords but is not from a newsletter"
+    },
+    {
+      "name": "Customer Support",
+      "category": "support",
+      "needs_reply": true,
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "field": "recipient",
+            "pattern": "support@"
+          },
+          {
+            "field": "subject",
+            "pattern": "regex:(?i).*(help|support|issue|problem|broken|doesn't work).*"
+          }
+        ]
+      },
+      "confidence": 0.85,
+      "priority": 2,
+      "explanation": "Email related to customer support"
+    },
+    {
+      "name": "Newsletter",
+      "category": "promotional",
+      "needs_reply": false,
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "field": "sender",
+            "pattern": "@newsletter."
+          },
+          {
+            "field": "sender",
+            "pattern": "noreply@"
+          },
+          {
+            "field": "subject",
+            "pattern": "regex:(?i).*(newsletter|digest|update|weekly|monthly).*"
+          }
+        ]
+      },
+      "confidence": 0.9,
+      "explanation": "Email appears to be a newsletter or automated update"
+    }
+  ]
+}

@@ -78,3 +78,20 @@ class EmailMessage(BaseModel):
     def has_attachments(self) -> bool:
         """Check if the email has attachments."""
         return len(self.attachments) > 0
+    
+    @property
+    def message_id(self) -> str:
+        """Get the message ID (for backward compatibility)."""
+        return self.id
+    
+    @property
+    def sender(self) -> str:
+        """Get the sender's email address (for backward compatibility)."""
+        return self.from_address.email if self.from_address else ""
+    
+    @property
+    def recipient(self) -> str:
+        """Get the primary recipient (for backward compatibility)."""
+        if not self.to_addresses:
+            return ""
+        return self.to_addresses[0].email

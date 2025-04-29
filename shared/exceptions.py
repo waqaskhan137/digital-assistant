@@ -18,7 +18,10 @@ class ValidationError(GmailAutomationError):
 
 class ExternalServiceError(GmailAutomationError):
     """Raised for errors originating from external services (e.g., Gmail API, RabbitMQ)."""
-    pass
+    def __init__(self, message: str, service: str = None, details: dict = None):
+        super().__init__(message)
+        self.service = service
+        self.details = details or {}
 
 class ResourceNotFoundError(GmailAutomationError):
     """Raised when a requested resource is not found."""

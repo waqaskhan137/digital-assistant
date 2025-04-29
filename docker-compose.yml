@@ -29,6 +29,20 @@ services:
       - redis
       - rabbitmq
 
+  classification-service:
+    build:
+      context: .
+      dockerfile: ./services/classification_service/Dockerfile
+    ports:
+      - "8003:8000"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - CLASSIFICATION_INPUT_QUEUE=email_to_classify
+      - CLASSIFICATION_OUTPUT_QUEUE=classification_results
+      - LOG_LEVEL=INFO
+    depends_on:
+      - rabbitmq
+
   redis:
     image: redis:alpine
     ports:
