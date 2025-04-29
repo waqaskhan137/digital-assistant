@@ -29,45 +29,6 @@ services:
       - redis
       - rabbitmq
 
-  classification-service:
-    build:
-      context: ./services/classification_service
-    ports:
-      - "8003:8000"
-    depends_on:
-      - rabbitmq
-
-  response-service:
-    build:
-      context: ./services/response_service
-    ports:
-      - "8004:8000"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    depends_on:
-      - rabbitmq
-
-  draft-service:
-    build:
-      context: ./services/draft_service
-    ports:
-      - "8005:8000"
-    depends_on:
-      - auth-service
-      - rabbitmq
-
-  api-gateway:
-    build:
-      context: ./services/api_gateway
-    ports:
-      - "8000:8000"
-    depends_on:
-      - auth-service
-      - email-service
-      - classification-service
-      - response-service
-      - draft-service
-
   redis:
     image: redis:alpine
     ports:
